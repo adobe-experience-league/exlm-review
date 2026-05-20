@@ -798,6 +798,8 @@ export function getConfig() {
   const cdnOrigin = `https://${cdnHost}`;
   const premiumLearningAuthAPI = `${cdnOrigin}/api/v1/web/alm/authentication`;
   const lang = document.querySelector('html').lang || 'en';
+  // Premium Learning is not offered for nl/sv locales; use English PL home until those languages are deprecated.
+  const premiumHomeLang = lang === 'nl' || lang === 'sv' ? 'en' : lang;
   // Locale param for Community page URL
   const communityLocale = communityLangsMap.get(lang) || 'en';
   // Lang param for Adobe account URL
@@ -891,7 +893,7 @@ export function getConfig() {
     // Events Page URL
     eventsURL: `${cdnOrigin}/${lang}/events`,
     // Premium Learning home (for premium learner nav link)
-    premiumHomeUrl: `${cdnOrigin}/${lang}/premium/home`,
+    premiumHomeUrl: `${cdnOrigin}/${premiumHomeLang}/premium/home`,
     // Brand Concierge
     bcDatastreamId: '87ae6de9-a49c-4734-a88a-17ec707ded09',
     bcOrgId: 'E4722728699EC56A0A495CA2@AdobeOrg',
@@ -1606,7 +1608,7 @@ export async function fetchJson(url, fallbackUrl) {
 }
 
 export function xssSanitizeQueryParamValue(value) {
-  return value?.replace(/[^a-zA-Z0-9\s.]/g, '');
+  return value?.replace(/[^a-zA-Z0-9\s.|]/g, '');
 }
 
 export function getCookie(cookieName) {
@@ -1770,11 +1772,11 @@ async function loadPage() {
               const suggestedContentBlock = document.querySelector('.premium-learning-suggested-content');
 
               if (hasEnrollments) {
-                // User has enrollments - remove suggested content block
-                suggestedContentBlock?.remove();
+                // User has enrollments - remove suggested content block wrapper
+                suggestedContentBlock?.parentElement?.remove();
               } else {
-                // User has no enrollments - remove active content block
-                activeContentBlock?.remove();
+                // User has no enrollments - remove active content block wrapper
+                activeContentBlock?.parentElement?.remove();
               }
             }
           })

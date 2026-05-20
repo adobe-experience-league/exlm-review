@@ -1384,15 +1384,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["courses-section", "default"]
+            "value": "courses-section,default"
           },
           {
             "name": "White",
-            "value": ["courses-section", "bg-white"]
+            "value": "courses-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["courses-section", "bg-dark-gray"]
+            "value": "courses-section,bg-dark-gray"
           }
         ]
       },
@@ -1418,15 +1418,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["course-hub-section", "default"]
+            "value": "course-hub-section,default"
           },
           {
             "name": "White",
-            "value": ["course-hub-section", "bg-white"]
+            "value": "course-hub-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["course-hub-section", "bg-dark-gray"]
+            "value": "course-hub-section,bg-dark-gray"
           }
         ]
       },
@@ -1467,15 +1467,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["article-content-section", "default"]
+            "value": "article-content-section,default"
           },
           {
             "name": "White",
-            "value": ["article-content-section", "bg-white"]
+            "value": "article-content-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["article-content-section", "bg-dark-gray"]
+            "value": "article-content-section,bg-dark-gray"
           }
         ]
       },
@@ -6385,6 +6385,10 @@
     ]
   },
   {
+    "id": "events-search",
+    "fields": []
+  },
+  {
     "id": "featured-authors",
     "fields": [
       {
@@ -6619,15 +6623,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["profile-section", "default"]
+            "value": "profile-section,default"
           },
           {
             "name": "White",
-            "value": ["profile-section", "bg-white"]
+            "value": "profile-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["profile-section", "bg-dark-gray"]
+            "value": "profile-section,bg-dark-gray"
           }
         ]
       },
@@ -6660,15 +6664,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["profile-bottom-section", "default"]
+            "value": "profile-bottom-section,default"
           },
           {
             "name": "White",
-            "value": ["profile-bottom-section", "bg-white"]
+            "value": "profile-bottom-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["profile-bottom-section", "bg-dark-gray"]
+            "value": "profile-bottom-section,bg-dark-gray"
           }
         ]
       },
@@ -6721,15 +6725,15 @@
         "options": [
           {
             "name": "Default",
-            "value": ["premium-learning-section", "default"]
+            "value": "premium-learning-section,default"
           },
           {
             "name": "White",
-            "value": ["premium-learning-section", "bg-white"]
+            "value": "premium-learning-section,bg-white"
           },
           {
             "name": "Dark Gray",
-            "value": ["premium-learning-section", "bg-dark-gray"]
+            "value": "premium-learning-section,bg-dark-gray"
           }
         ]
       },
@@ -10668,46 +10672,37 @@
         ]
       },
       {
-        "component": "aem-tag",
-        "name": "product",
-        "label": "Solution(s) or Feature(s)",
+        "component": "custom-aem-tag",
+        "name": "pl-tq-product",
+        "label": "Product(s) v2",
         "valueType": "string",
-        "rootPath": "/content/cq:tags/exl",
-        "description": "Select the product for which courses/cohorts should be displayed."
-      },
-      {
-        "component": "select",
-        "name": "cta_Type",
-        "value": "primary",
-        "label": "CTA Type",
-        "description": "'Primary' will render a filled blue CTA, 'Secondary' will render a white CTA with a black border and black text",
-        "valueType": "string",
-        "options": [
-          {
-            "name": "Primary",
-            "value": "primary"
-          },
-          {
-            "name": "Secondary",
-            "value": "secondary"
+        "description": "Select the product for which courses/cohorts should be displayed. Optional - all are included if no selection is made.",
+        "dataSource": {
+          "type": "action",
+          "config": {
+            "name": "getTQTags",
+            "params": {
+              "taxonomyType": "product"
+            }
           }
-        ]
+        },
+        "extensionId": "exl-ue-extension"
       },
       {
         "component": "text",
         "valueType": "string",
         "name": "cta_linkText",
         "value": "",
-        "label": "CTA Text",
-        "description": "Text to be shown inside button."
+        "label": "View More Text",
+        "description": "Text to be shown as the link."
       },
       {
         "component": "text",
         "valueType": "string",
         "name": "cta_link",
         "value": "",
-        "label": "CTA Link",
-        "description": "This button will be displayed only if the selected product has more than 4 results"
+        "label": "View More Link",
+        "description": "This link will be displayed only if the selected product has more than 4 results"
       }
     ]
   },
@@ -10807,6 +10802,60 @@
         "value": "",
         "label": "Long Description",
         "description": "Sets the description of Premium learning browse cards block."
+      }
+    ]
+  },
+  {
+    "id": "premium-learning-profile-badges",
+    "fields": [
+      {
+        "component": "text",
+        "valueType": "string",
+        "name": "title",
+        "value": "",
+        "label": "Title",
+        "description": "Sets the title for the Premium learning Profile badges block."
+      },
+      {
+        "component": "select",
+        "valueType": "string",
+        "name": "titleType",
+        "value": "",
+        "label": "Title Heading Type",
+        "options": [
+          {
+            "name": "H1",
+            "value": "h1"
+          },
+          {
+            "name": "H2",
+            "value": "h2"
+          },
+          {
+            "name": "H3",
+            "value": "h3"
+          },
+          {
+            "name": "H4",
+            "value": "h4"
+          },
+          {
+            "name": "H5",
+            "value": "h5"
+          },
+          {
+            "name": "H6",
+            "value": "h6"
+          }
+        ]
+      },
+      {
+        "component": "richtext",
+        "valueType": "string",
+        "name": "description",
+        "value": "",
+        "label": "Long Description",
+        "description": "Sets the description text for the Premium Learning Profile Badges block."
       }
     ]
   }
