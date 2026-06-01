@@ -176,6 +176,7 @@ export const isHomePage = (() => {
 })();
 
 export const isCertificatePage = () => !!document.querySelector('.course-completion'); // Checking for presence of course-completion block
+export const isUEMode = window.hlx?.aemRoot || window.location.href.includes('.html');
 
 /**
  * add a section for the left rail when on a browse page.
@@ -781,6 +782,19 @@ export function getConfig() {
     ['en', 'en'],
     ['it', 'it'],
   ]);
+
+  const plCommunityLangsMap = new Map([
+    ['en-US', 'en'],
+    ['de-DE', 'de'],
+    ['es-ES', 'es'],
+    ['fr-FR', 'fr'],
+    ['ja-JP', 'ja'],
+    ['pt-PT', 'pt'],
+    ['ko-KR', 'ko'],
+    ['zh-CN', 'zh-hans'],
+    ['zh-TW', 'zh-hant'],
+  ]);
+
   const cookieConsentName = 'OptanonConsent';
   const targetCriteriaIds = {
     mostPopular: 'exl-hp-auth-recs-2',
@@ -797,7 +811,10 @@ export function getConfig() {
   const communityHost = currentEnv?.community || defaultEnv.community;
   const cdnOrigin = `https://${cdnHost}`;
   const premiumLearningAuthAPI = `${cdnOrigin}/api/v1/web/alm/authentication`;
-  const lang = document.querySelector('html').lang || 'en';
+  const rawLang = document.querySelector('html').lang || 'en';
+  const lang = window.location.hostname.includes(communityHost)
+    ? plCommunityLangsMap.get(rawLang) || rawLang.split('-')[0]
+    : rawLang;
   // Premium Learning is not offered for nl/sv locales; use English PL home until those languages are deprecated.
   const premiumHomeLang = lang === 'nl' || lang === 'sv' ? 'en' : lang;
   // Locale param for Community page URL
@@ -822,8 +839,8 @@ export function getConfig() {
   let plPrivateCatalogIds;
   let plPublicCatalogIds;
   if (isProd) {
-    plPrivateCatalogIds = []; // TODO: update once configured in ALM
-    plPublicCatalogIds = []; // TODO: update once configured in ALM
+    plPrivateCatalogIds = ['208912'];
+    plPublicCatalogIds = ['208913'];
   } else if (isStage) {
     plPrivateCatalogIds = ['208426'];
     plPublicCatalogIds = ['208427'];
@@ -1688,7 +1705,7 @@ async function loadPage() {
   await loadLazy(document);
   loadDelayed();
   await showSignupDialog();
-  if (window.hlx.aemRoot || window.location.href.includes('.html')) {
+  if (isUEMode) {
     loadDefaultModule(`${window.hlx.codeBasePath}/scripts/editor-support-seo.js`);
   }
   if (isDocPage) {
@@ -1710,7 +1727,7 @@ async function loadPage() {
   if (window.hlx.DO_NOT_LOAD_PAGE) return;
 
   // For AEM Author mode, decode the tags value
-  if (window.hlx.aemRoot || window.location.href.includes('.html')) {
+  if (isUEMode) {
     decodeAemCqMetaTags();
     updateTQTagsMetadata();
     decodeAemPageMetaTags();
@@ -1763,19 +1780,18 @@ async function loadPage() {
               // TODO: Guard this fetch behind a check that the PL blocks are actually present
               // in the DOM before firing — avoids an unnecessary API call on profile pages
               // that have no PL content blocks.
-              const { fetchUserEnrollments } = await import('./data-service/premium-learning-data-service.js');
+              const { hasActiveEnrollments } = await import('./data-service/premium-learning-data-service.js');
               const config = getConfig();
-              const enrollmentData = await fetchUserEnrollments(config, 'learningProgram', 10);
-              const hasEnrollments = enrollmentData?.data?.length > 0;
+              const hasEnrollments = await hasActiveEnrollments(config);
 
               const activeContentBlock = document.querySelector('.premium-learning-active-content');
               const suggestedContentBlock = document.querySelector('.premium-learning-suggested-content');
 
               if (hasEnrollments) {
-                // User has enrollments - remove suggested content block wrapper
+                // User has active enrollments - remove suggested content block wrapper
                 suggestedContentBlock?.parentElement?.remove();
               } else {
-                // User has no enrollments - remove active content block wrapper
+                // User has no active enrollments - remove active content block wrapper
                 activeContentBlock?.parentElement?.remove();
               }
             }
@@ -1812,7 +1828,13 @@ async function loadPage() {
   }
   // Initialize Premium Learning auth — fully non-blocking, does not delay loadPage().
   if (isFeatureEnabled('isPremiumLearningEnabled')) {
-    if (window.hlx.aemRoot || window.location.href.includes('.html')) {
+    if (isUEMode) {
+      // getConfig() must be called before the import resolves. In non-UE mode this is
+      // guaranteed by isUserSignedIn() → loadIms() → getConfig(). In UE mode there is
+      // no such gate, so a cached module import can resolve before loadLazy() ever calls
+      // getConfig(), leaving window.exlm.config undefined and causing exchangePLToken to
+      // silently no-op. Calling it here is synchronous and idempotent — no effect on non-UE.
+      getConfig();
       // UE Author Mode: fetch PL token anonymously via ?auth=false (no IMS required).
       import('./utils/premium-learning-utils.js')
         .then(({ initPLAuthAnonymous }) => initPLAuthAnonymous())

@@ -403,7 +403,7 @@ export default class PLDataService {
       'page[limit]': '10',
       sort: '-recommendationScore',
       'enforcedFields[learningObject]': 'products,roles,extensionOverrides,effectivenessData',
-      include: 'instances.loResources.resources',
+      include: 'instances.loResources.resources,skills.skillLevel.skill',
     });
   }
 
@@ -488,7 +488,7 @@ export default class PLDataService {
           'page[limit]': String(noOfResults || PLDataService.DEFAULT_SEARCH_RESULTS_COUNT),
           sort: '-recommendationScore',
           'enforcedFields[learningObject]': 'products,roles,extensionOverrides,effectivenessData',
-          include: 'instances.loResources.resources',
+          include: 'instances.loResources.resources,skills.skillLevel.skill',
         });
         const headers = {
           Authorization: `oauth ${token}`,
@@ -726,6 +726,7 @@ export async function fetchCohortProgress(cohortId, config) {
         'subLOs.instances',
         'instances.loResources.resources',
         'subLOs.instances.loResources.resources',
+        'skills.skillLevel',
       ].join(','),
     );
 
@@ -795,6 +796,37 @@ export async function fetchBoardPosts(boardId, config) {
     return response.ok ? response.json() : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Checks if user has any active (non-completed) enrollments by paginating through all pages
+ * @param {Object} config - Config object (from getConfig())
+ * @returns {Promise<boolean>} True if user has active enrollments, false otherwise
+ */
+export async function hasActiveEnrollments(config) {
+  try {
+    let result = await fetchUserEnrollments(config, 'learningProgram', 10, null, 'Active');
+
+    while (result) {
+      const nonCompleted = (result.data || []).filter((enrollment) => enrollment.attributes?.state !== 'COMPLETED');
+
+      if (nonCompleted.length > 0) {
+        return true; // Found at least one active enrollment
+      }
+
+      const nextUrl = result.links?.next;
+      if (!nextUrl) break;
+
+      // eslint-disable-next-line no-await-in-loop
+      result = await fetchNextEnrollmentPage(nextUrl);
+    }
+
+    return false; // No active enrollments found after checking all pages
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Error checking active enrollments:', error);
+    return false;
   }
 }
 
