@@ -47,6 +47,11 @@ function configureSearchHeadlessEngine({ module, searchEngine, searchHub, contex
       'documenttype',
       'el_author_type',
       'el_contenttype',
+      'el_event_series',
+      'el_event_start_time',
+      'el_event_type',
+      'el_event_speakers_name',
+      'el_event_speakers_profile_picture_url',
       'el_id',
       'el_interactionstyle',
       'el_kudo_status',
@@ -56,6 +61,9 @@ function configureSearchHeadlessEngine({ module, searchEngine, searchHub, contex
       'el_reply_status',
       'el_solution',
       'el_solutions_authored',
+      'el_level',
+      'el_course_duration',
+      'el_course_module_count',
       'el_type',
       'el_usergenerictext',
       'el_version',
@@ -88,6 +96,26 @@ function configureSearchHeadlessEngine({ module, searchEngine, searchHub, contex
   }
   searchEngine.dispatch(searchConfiguration);
   searchEngine.dispatch(fields);
+}
+
+/**
+ * Read/write the visible sort caption on a `.sort-drop-btn` (prefers `.sort-drop-btn-value`).
+ * Pure DOM helpers — no Coveo state; safe to reuse for additional sort widgets.
+ */
+export function getSortButtonCaption(btn) {
+  if (!btn) return '';
+  const valueEl = btn.querySelector('.sort-drop-btn-value');
+  return valueEl ? valueEl.textContent.trim() : btn.textContent.trim();
+}
+
+export function setSortButtonCaption(btn, caption) {
+  if (!btn) return;
+  const valueEl = btn.querySelector('.sort-drop-btn-value');
+  if (valueEl) {
+    valueEl.textContent = caption;
+  } else {
+    btn.textContent = caption;
+  }
 }
 
 export const fragment = () => window.location.hash.slice(1);
@@ -154,6 +182,13 @@ export default async function initiateCoveoHeadlessSearch({
         const headlessAuthorTypeFacet = module.buildFacet(headlessSearchEngine, {
           options: {
             field: 'author_type',
+          },
+          numberOfValues: 8,
+        });
+
+        const headlessEventSeriesFacet = module.buildFacet(headlessSearchEngine, {
+          options: {
+            field: 'el_event_series',
           },
           numberOfValues: 8,
         });
@@ -287,6 +322,7 @@ export default async function initiateCoveoHeadlessSearch({
         window.headlessExperienceFacet = headlessExperienceFacet;
         window.headlessProductFacet = headlessProductFacet;
         window.headlessAuthorTypeFacet = headlessAuthorTypeFacet;
+        window.headlessEventSeriesFacet = headlessEventSeriesFacet;
         window.headlessStatusControllers = statusControllers;
         window.headlessPager = headlessPager;
         window.headlessResultsPerPage = headlessResultsPerPage;
@@ -320,7 +356,7 @@ export default async function initiateCoveoHeadlessSearch({
           aElement.setAttribute('href', '/');
           aElement.setAttribute('data-sort-criteria', option.sortCriteria);
           aElement.setAttribute('data-sort-caption', option.label);
-          aElement.innerHTML = option.label;
+          aElement.textContent = option.label;
           sortWrapperEl.appendChild(aElement);
         });
 
@@ -339,19 +375,19 @@ export default async function initiateCoveoHeadlessSearch({
               // eslint-disable-next-line
               switch (scValue) {
                 case 'relevancy':
-                  sortBtn.innerHTML = sortLabel.relevance;
+                  setSortButtonCaption(sortBtn, sortLabel.relevance);
                   criteria = [[sortLabel.relevance, module.buildRelevanceSortCriterion()]];
                   break;
                 case '@el_view_count descending':
-                  sortBtn.innerHTML = sortLabel.popularity;
+                  setSortButtonCaption(sortBtn, sortLabel.popularity);
                   criteria = [[sortLabel.popularity, module.buildFieldSortCriterion('el_view_count', 'descending')]];
                   break;
                 case 'date descending':
-                  sortBtn.innerHTML = sortLabel.newest;
+                  setSortButtonCaption(sortBtn, sortLabel.newest);
                   criteria = [[sortLabel.newest, module.buildDateSortCriterion('descending')]];
                   break;
                 case 'date ascending':
-                  sortBtn.innerHTML = sortLabel.oldest;
+                  setSortButtonCaption(sortBtn, sortLabel.oldest);
                   criteria = [[sortLabel.oldest, module.buildDateSortCriterion('ascending')]];
                   break;
               }
@@ -369,7 +405,7 @@ export default async function initiateCoveoHeadlessSearch({
               const anchorCaption = anchor.getAttribute('data-sort-caption');
               const anchorSortCriteria = anchor.getAttribute('data-sort-criteria');
 
-              if (anchorCaption === sortBtn.innerHTML) {
+              if (anchorCaption === getSortButtonCaption(sortBtn)) {
                 anchor.classList.add('selected');
               }
 
@@ -380,7 +416,7 @@ export default async function initiateCoveoHeadlessSearch({
                 });
                 anchor.classList.add('selected');
                 sortDropdown.classList.remove('show');
-                sortBtn.innerHTML = anchorCaption;
+                setSortButtonCaption(sortBtn, anchorCaption);
 
                 // eslint-disable-next-line
                 switch (anchorSortCriteria) {

@@ -3,6 +3,7 @@ import browseCardDataModel from '../data-model/browse-cards-model.js';
 import { CONTENT_TYPES } from '../data-service/coveo/coveo-exl-pipeline-constants.js';
 import { fetchLanguagePlaceholders } from '../scripts.js';
 import { rewriteDocsPath } from '../utils/path-utils.js';
+import isFeatureEnabled from '../utils/feature-flag-utils.js';
 
 /**
  * Module that provides functionality for adapting Coveo search results to BrowseCards data model.
@@ -89,23 +90,54 @@ const BrowseCardsCoveoDataAdaptor = (() => {
       el_course_duration,
       el_course_module_count,
       el_level,
+      el_event_series,
+      el_event_start_time,
+      el_event_type,
+      el_event_speakers_name,
+      el_event_speakers_profile_picture_url,
+      el_event_duration,
     } = parentResult?.raw || raw || {};
     let contentType;
     if (el_type) {
       contentType = el_type.trim();
     } else {
       contentType = Array.isArray(el_contenttype) ? el_contenttype[0]?.trim() : el_contenttype?.trim();
+
+      // TODO: Remove this condition once Events v2 is live
+      if (isFeatureEnabled('isEventsV2') && contentType?.toLowerCase() === 'event') {
+        contentType = Array.isArray(el_contenttype) ? el_contenttype[1]?.trim() : el_contenttype?.trim();
+      }
     }
     let products;
+
     if (el_solution) {
-      products = Array.isArray(el_solution) ? el_solution : el_solution.split(/,\s*/);
+      products = Array.isArray(el_solution)
+        ? el_solution.flatMap((item) => item.split(/,\s*/))
+        : el_solution.split(/,\s*/);
     } else if (el_product) {
-      products = Array.isArray(el_product) ? el_product : el_product.split(/,\s*/);
+      products = Array.isArray(el_product)
+        ? el_product.flatMap((item) => item.split(/,\s*/))
+        : el_product.split(/,\s*/);
     }
     const tags = createTags(result, contentType?.toLowerCase());
     let url = parentResult?.clickUri || parentResult?.uri || clickUri || uri || '';
     url = rewriteDocsPath(url);
     const contentTypeTitleCase = convertToTitleCase(contentType?.toLowerCase()).replace(/\s+/g, '');
+
+    const eventSeries = raw?.el_event_series || el_event_series || '';
+    const eventTime = raw?.el_event_start_time || el_event_start_time || '';
+    const eventType = raw?.el_event_type || el_event_type || '';
+    const eventSpeakersName = raw?.el_event_speakers_name || el_event_speakers_name || '';
+    const eventSpeakersProfile =
+      raw?.el_event_speakers_profile_picture_url || el_event_speakers_profile_picture_url || '';
+    const eventDuration = raw?.el_event_duration || el_event_duration || '';
+
+    let eventDate = '';
+    if (raw?.el_event_start_time) {
+      eventDate = new Date(raw.el_event_start_time).toISOString();
+    } else if (el_event_start_time) {
+      eventDate = new Date(el_event_start_time).toISOString();
+    }
 
     return {
       ...browseCardDataModel,
@@ -134,6 +166,18 @@ const BrowseCardsCoveoDataAdaptor = (() => {
       permanentid: raw?.permanentid,
       searchUid,
       index,
+
+      event: {
+        series: eventSeries,
+        time: eventTime,
+        type: eventType,
+        speakers: {
+          name: eventSpeakersName,
+          profilePictureURL: eventSpeakersProfile,
+        },
+        date: eventDate,
+        duration: eventDuration,
+      },
       authorInfo: {
         name: raw?.author_name || '',
         type: raw?.author_type || '',

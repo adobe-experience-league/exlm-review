@@ -5,6 +5,7 @@ import loadJWT from './jwt.js';
 import csrf from './csrf.js';
 import { getMetadata } from '../lib-franklin.js';
 import fetchStaleWhileRevalidate from './fetch-stale-while-revalidate.js';
+import { deleteCookie } from '../utils/cookie-utils.js';
 
 // NOTE: to keep this viatl utility small, please do not increase the number of imports or use dynamic imports when needed.
 
@@ -32,6 +33,8 @@ export async function signOut() {
   ['JWT', 'coveoToken', 'exl-profile', 'attributes', 'profile', 'pps-profile'].forEach((key) =>
     sessionStorage.removeItem(key),
   );
+
+  ['alm_access_token', 'alm_user_id'].forEach((cookie) => deleteCookie(cookie));
 
   // Clear all cache entries from both sessionStorage and localStorage
   Object.keys(sessionStorage).forEach((key) => {
@@ -174,9 +177,10 @@ class ProfileClient {
     if (!signedIn) return null;
 
     const accountId = (await window.adobeIMS.getProfile()).userId;
+    const separator = khorosProfileDetailsUrl.includes('?') ? '&' : '?';
 
     try {
-      const response = await fetch(`${khorosProfileDetailsUrl}?user=${accountId}`, {
+      const response = await fetch(`${khorosProfileDetailsUrl}${separator}user=${accountId}`, {
         method: 'GET',
         headers: {
           'x-ims-token': await window.adobeIMS?.getAccessToken().token,

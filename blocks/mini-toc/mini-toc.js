@@ -82,14 +82,20 @@ function buildMiniToc(block, placeholders) {
   const headers = Array.from(baseEl.querySelectorAll(selectorQuery)).filter(headerExclusions);
 
   if (headers.length > 1) {
-    const html = headers.map((i) => `<li><a href="#${i.id}" class="${setPadding(i.nodeName)}">${i.innerHTML}</a></li>`);
+    const html = headers.map((i) => {
+      const cleanHtml = i.innerHTML.replace(/<span class="(badge|icon)[^>]*>.*?<\/span>\s*/gi, '');
+      const cleanText = cleanHtml.replace(/<[^>]+>/g, '').trim();
+      return `<li><a href="#${i.id}" class="${setPadding(i.nodeName)}">${cleanText}</a></li>`;
+    });
     // eslint-disable-next-line no-restricted-globals
     const url = new URL(location.href);
     const lhash = url.hash.length > 0;
 
     render(() => {
       const tocHeadingDivNode = `<div><h2>${miniTOCHeading}</h2></div>`;
-      block.innerHTML = `${tocHeadingDivNode}\n<div class='scrollable-div'><ul>${html.join('\n')}</ul></div>`;
+      block.innerHTML = `<nav>${tocHeadingDivNode}\n<div class='scrollable-div'><ul>${html.join(
+        '\n',
+      )}</ul></div></nav>`;
 
       let lactive = false;
       const anchors = Array.from(block.querySelectorAll('a'));

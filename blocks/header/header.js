@@ -14,6 +14,8 @@ import {
   fetchLanguagePlaceholders,
 } from '../../scripts/scripts.js';
 import getProducts from '../../scripts/utils/product-utils.js';
+import { isSignedInUser } from '../../scripts/auth/profile.js';
+import { isPLEligible } from '../../scripts/utils/premium-learning-utils.js';
 import {
   decoratorState,
   isMobile,
@@ -49,6 +51,7 @@ import ProfileMenu from './profile-menu.js';
  * @property {string} navLinkOrigin - origin to be added to relative links in the nav
  * @property {import('../language/language.js').Language[]} languages - array of languages to dispay in language selector
  * @property {(lang: string) => void} onLanguageChange - called when language is changed
+ * @property {Object} [placeholders] - language placeholders object
  */
 
 const HEADER_CSS = `/blocks/header/exl-header.css`;
@@ -81,8 +84,7 @@ async function loadSearchElement() {
   if (solutionTag) {
     window.headlessSolutionProductKey = solutionTag;
   }
-  searchElementPromise =
-    searchElementPromise ?? import('../../scripts/search/search.js').then((mod) => mod.default ?? mod);
+  searchElementPromise = searchElementPromise ?? import('../../scripts/search/search.js');
   return searchElementPromise;
 }
 
@@ -104,7 +106,11 @@ const brandDecorator = (brandBlock, decoratorOptions) => {
   const brandLink = brandBlock.querySelector('a');
   brandBlock.replaceChildren(brandLink);
   updateLinks(brandBlock, (currentHref) => {
-    const url = new URL(currentHref, decoratorOptions.navLinkOrigin);
+    let link = currentHref;
+    if (link === '/' && decoratorOptions.lang !== 'en') {
+      link = `/${decoratorOptions.lang}`;
+    }
+    const url = new URL(link, decoratorOptions.navLinkOrigin);
     return url.href;
   });
   return brandBlock;
@@ -281,19 +287,34 @@ const buildNavItems = (ul, level = 0) => {
       buildNavItems(content, level + 1);
     } else {
       navItem.classList.add('nav-item-leaf');
-      // if nav item is a leaf, remove the <p> wrapper
       const firstEl = navItem.firstElementChild;
-      if (firstEl?.tagName === 'P') {
-        if (firstEl.firstElementChild?.tagName === 'A') {
-          firstEl.replaceWith(firstEl.firstElementChild);
+      if (firstEl?.tagName === 'P' && firstEl.firstElementChild?.tagName === 'A') {
+        firstEl.replaceWith(firstEl.firstElementChild);
+      }
+
+      const anchor = navItem.querySelector(':scope > a');
+      if (!anchor) return;
+
+      let subtitleHTML = null;
+      const subtitleP = navItem.querySelector(':scope > p');
+      if (subtitleP) {
+        subtitleHTML = subtitleP.innerHTML;
+        subtitleP.remove();
+      } else {
+        // Fallback: next text node after <a>
+        let node = anchor.nextSibling;
+        while (node && node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) {
+          node = node.nextSibling;
+        }
+
+        if (node?.nodeType === Node.TEXT_NODE) {
+          subtitleHTML = node.textContent.trim();
+          node.remove();
         }
       }
-      // if nav item has a second element, it's a subtitle
-      const secondEl = navItem.children[1];
-      if (secondEl?.tagName === 'P') {
-        const subtitle = htmlToElement(`<span class="nav-item-subtitle">${secondEl.innerHTML}</span>`);
-        navItem.firstElementChild.appendChild(subtitle);
-        secondEl.remove();
+
+      if (subtitleHTML) {
+        anchor.appendChild(htmlToElement(`<span class="nav-item-subtitle">${subtitleHTML}</span>`));
       }
     }
   };
@@ -301,7 +322,11 @@ const buildNavItems = (ul, level = 0) => {
   if (level === 0) {
     // add search link (visible on mobile only excluding Search page)
     if (!document.body.classList.contains('search')) {
-      ul.appendChild(htmlToElement(`<li class="nav-item-mobile">${decoratorState.searchLinkHtml}</li>`));
+      const mobileSearchLi = htmlToElement(`<li class="nav-item-mobile">${decoratorState.searchLinkHtml}</li>`);
+      ul.appendChild(mobileSearchLi);
+      mobileSearchLi.querySelector('a')?.addEventListener('click', (e) => {
+        decoratorState.headerSearchIconClick?.(e);
+      });
     }
     const addMobileLangSelector = async () => {
       // add language select (visible on mobile only)
@@ -392,6 +417,28 @@ const navDecorator = async (navBlock, decoratorOptions) => {
   const ul = navWrapper.querySelector(':scope > ul');
   buildNavItems(ul);
 
+  // TODO: Remove isSignedInUser call and move signedIn check to isPLEligible function once cyclic dependency is resolved.
+  isSignedInUser()
+    .then((signedIn) => isPLEligible(signedIn))
+    .then((isMember) => {
+      if (isMember) {
+        const placeholders = decoratorOptions.placeholders ?? {};
+        const premiumLearningLabel = placeholders?.premiumLearningHeaderLabel || 'Premium Learning';
+        const { premiumHomeUrl } = getConfig();
+        ul.appendChild(
+          htmlToElement(
+            `<li class="nav-item nav-item-root nav-item-leaf">
+              <a href="${premiumHomeUrl}" title="${premiumLearningLabel}">${premiumLearningLabel}</a>
+            </li>`,
+          ),
+        );
+      }
+    })
+    .catch((err) => {
+      /* eslint-disable-next-line no-console */
+      console.error('Error checking Premium Learning membership in header:', err);
+    });
+
   // build featured products nav links
   buildFeaturedProductsNavLinks(navBlock, decoratorOptions.lang).then(() => {
     // this needs to run at the end of navDecorator,
@@ -406,20 +453,12 @@ const navDecorator = async (navBlock, decoratorOptions) => {
  * @param {DecoratorOptions} decoratorOptions
  */
 const searchDecorator = async (searchBlock, decoratorOptions) => {
-  let placeholders = {};
-  try {
-    placeholders = await fetchLanguagePlaceholders();
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('Error fetching placeholders:', err);
-  }
+  const placeholders = decoratorOptions.placeholders ?? {};
   // save this for later use in mobile nav.
   const searchLink = getCell(searchBlock, 1, 1)?.firstChild;
-  decoratorState.searchLinkHtml = searchLink.outerHTML;
+  decoratorState.searchLinkHtml = searchLink?.outerHTML ?? '';
 
-  // get search placeholder
-  const searchPlaceholder = getCell(searchBlock, 2, 1)?.firstChild;
-  // build search options
+  // build search options (used for default / contextual content-type filter on redirect)
   const searchOptions = getCell(searchBlock, 3, 1)?.firstElementChild?.children || [];
   const options = [...searchOptions].map((option) => option.textContent);
 
@@ -427,62 +466,31 @@ const searchDecorator = async (searchBlock, decoratorOptions) => {
   const searchWrapper = htmlToElement(
     `<div class="search-wrapper">
       <div class="search-short">
-        <a href="${searchLink?.href}" aria-label="Search">
+        <a href="${searchLink?.href || '#'}" aria-label="Search">
           <span title="${placeholders?.search || 'Search'}" class="icon icon-search"></span>
         </a>
       </div>
-      <div class="search-full">
-        <div class="search-container">
-          <span title="${placeholders?.search || 'Search'}" class="icon icon-search"></span>
-          <input autocomplete="off" class="search-input" type="text" aria-label="top-nav-combo-search" aria-expanded="false" title="${
-            placeholders?.searchPlaceholderTitle || 'Insert a query. Press enter to send'
-          }" role="combobox" placeholder="${searchPlaceholder.textContent}">
-          <span title="${placeholders?.searchClearLabel || 'Clear'}" class="icon icon-clear search-clear-icon"></span>
-          <div class="search-suggestions-popover">
-            <ul role="listbox">
-            </ul>
-          </div>
-        </div>
-        <button type="button" class="search-picker-button" aria-haspopup="true" aria-controls="search-picker-popover">
-          <span class="search-picker-label" data-filter-value="${options[0].split(':')[1]}">${
-            options[0].split(':')[0] || ''
-          }</span>
-        </button>
-        <div class="search-picker-popover" id="search-picker-popover">
-          <ul role="listbox">
-            ${options
-              .map(
-                (option, index) =>
-                  `<li tabindex="0" role="option" class="search-picker-label" data-filter-value="${
-                    option.split(':')[1]
-                  }">${
-                    index === 0
-                      ? `<span class="icon icon-checkmark"></span> <span data-filter-value="${option.split(':')[1]}">${
-                          option.split(':')[0]
-                        }</span>`
-                      : `<span data-filter-value="${option.split(':')[1]}">${option.split(':')[0]}</span>`
-                  }</li>`,
-              )
-              .join('')}
-          </ul>
-        </div>
-      <div>
-    </div>
-  `,
+    </div>`,
   );
 
-  const Search = await loadSearchElement();
-  searchBlock.append(searchWrapper);
-
-  const searchItem = new Search({ searchBlock, searchUrl: searchLink?.href });
-  searchItem.configureAutoComplete({
-    searchOptions: options,
-    showSearchSuggestions: true,
+  const searchModule = await loadSearchElement();
+  const { redirectToSearchPage, getHeaderSearchFilterValue } = searchModule;
+  const filterValue = getHeaderSearchFilterValue(options, {
+    preferCommunity: Boolean(decoratorOptions?.community?.active),
   });
+  const searchUrl = searchLink?.href;
 
-  if (decoratorOptions?.community?.active) {
-    searchItem.setSelectedSearchOption('Community');
+  if (searchUrl) {
+    decoratorState.headerSearchIconClick = (e) => {
+      e.preventDefault();
+      redirectToSearchPage(searchUrl, '', filterValue);
+    };
+    searchWrapper.querySelector('.search-short a')?.addEventListener('click', decoratorState.headerSearchIconClick);
+  } else {
+    decoratorState.headerSearchIconClick = null;
   }
+
+  searchBlock.append(searchWrapper);
   decorateIcons(searchBlock);
   return searchBlock;
 };
@@ -590,6 +598,8 @@ const productGridDecorator = async (productGridBlock, decoratorOptions) => {
     const productToggle = document.createElement('button');
     productToggle.classList.add('product-toggle');
     productToggle.setAttribute('aria-controls', 'product-dropdown');
+    productToggle.setAttribute('aria-expanded', 'false');
+    productToggle.setAttribute('aria-label', 'Product Grid');
     productToggle.innerHTML = `<span class="icon-grid"></span>`;
     productGridBlock.innerHTML = `${productToggle.outerHTML}${productDropdown.outerHTML}`;
     const gridToggler = productGridBlock.querySelector('.product-toggle');
@@ -625,10 +635,18 @@ const productGridDecorator = async (productGridBlock, decoratorOptions) => {
  * Decorates the adobe-logo block
  * @param {HTMLElement} adobeLogoBlock
  */
-const adobeLogoDecorator = async (adobeLogoBlock) => {
+const adobeLogoDecorator = async (adobeLogoBlock, decoratorOptions) => {
   simplifySingleCellBlock(adobeLogoBlock);
   decorateIcons(adobeLogoBlock);
   adobeLogoBlock.querySelector('a').setAttribute('aria-label', 'Adobe Experience League'); // a11y
+  updateLinks(adobeLogoBlock, (currentHref) => {
+    let link = currentHref;
+    if (link === '/' && decoratorOptions.lang !== 'en') {
+      link = `/${decoratorOptions.lang}`;
+    }
+    const url = new URL(link, decoratorOptions.navLinkOrigin);
+    return url.href;
+  });
   return adobeLogoBlock;
 };
 
@@ -656,11 +674,6 @@ class ExlHeader extends HTMLElement {
   constructor(options = {}) {
     super();
 
-    const doIsSignedInUSer = async () => {
-      const { isSignedInUser } = await import('../../scripts/auth/profile.js');
-      return isSignedInUser();
-    };
-
     const doSignOut = async () => {
       const { signOut } = await import('../../scripts/auth/profile.js');
       return signOut();
@@ -671,7 +684,7 @@ class ExlHeader extends HTMLElement {
     };
 
     this.decoratorOptions = options;
-    options.isUserSignedIn = options.isUserSignedIn || doIsSignedInUSer;
+    options.isUserSignedIn = options.isUserSignedIn || isSignedInUser;
     options.onSignOut = options.onSignOut || doSignOut;
     options.onSignIn = options.onSignIn || doSignIn;
     options.getProfilePicture = options.getProfilePicture || getPPSProfilePicture;
@@ -742,6 +755,14 @@ class ExlHeader extends HTMLElement {
       nav.ariaLabel = 'Main navigation';
 
       await decorateCommunityBlock(header, this.decoratorOptions);
+
+      try {
+        this.decoratorOptions.placeholders = await fetchLanguagePlaceholders(this.decoratorOptions.lang);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Error fetching placeholders:', err);
+        this.decoratorOptions.placeholders = {};
+      }
 
       const decorateHeaderBlock = async (className, decorator, options) => {
         try {

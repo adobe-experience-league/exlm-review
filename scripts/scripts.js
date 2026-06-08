@@ -21,6 +21,7 @@ import {
   loadBlock,
 } from './lib-franklin.js';
 import { initiateCoveoAtomicSearch } from './load-atomic-search-scripts.js';
+import isFeatureEnabled from './utils/feature-flag-utils.js';
 
 /**
  * please do not import any other modules here, as this file is used in the critical path.
@@ -166,7 +167,16 @@ export const isProfilePage = matchesAnyTheme(/^profile.*/);
 export const isBrowsePage = matchesAnyTheme(/^browse-.*/);
 export const isSignUpPage = matchesAnyTheme(/^signup.*/);
 export const isCourseStep = matchesAnyTheme(/course-step/);
+export const isOnDemandEventPage = matchesAnyTheme(/on-demand-event/);
+export const isLiveGradientBgPage = matchesAnyTheme(/page-bg-gradient/);
+export const isHomePage = (() => {
+  const { pathname } = window.location;
+  const lang = document.querySelector('html').lang || 'en';
+  return pathname === '/' || pathname === `/${lang}` || pathname === `/${lang}/`;
+})();
+
 export const isCertificatePage = () => !!document.querySelector('.course-completion'); // Checking for presence of course-completion block
+export const isUEMode = window.hlx?.aemRoot || window.location.href.includes('.html');
 
 /**
  * add a section for the left rail when on a browse page.
@@ -415,6 +425,29 @@ export const decorateLinks = (block) => {
 };
 
 /**
+ * Decorates links within sections marked with data-new-tab="true" to open in new tab
+ * @param {HTMLElement} main - The main container element
+ */
+export const decorateLinksWithinSection = (main) => {
+  const newTabSections = main.querySelectorAll('.section[data-new-tab="true"]');
+  if (newTabSections.length === 0) return;
+
+  newTabSections?.forEach((section) => {
+    const links = section.querySelectorAll('a');
+
+    links?.forEach((link) => {
+      const href = link.getAttribute('href');
+      if (href && !href.startsWith('#')) {
+        link.setAttribute('target', '_blank');
+        if (link.hostname !== window.location.hostname) {
+          link.setAttribute('rel', 'noopener noreferrer');
+        }
+      }
+    });
+  });
+};
+
+/**
  * see: https://github.com/adobe-experience-league/exlm-converter/pull/208
  * @param {HTMLElement} main
  */
@@ -621,15 +654,20 @@ export async function waitForLCPonMain(lcpBlocks) {
   document.body.style.display = null;
   const lcpCandidate = document.querySelector('main img');
   await new Promise((resolve) => {
-    if (lcpCandidate && lcpCandidate.src === 'about:error') {
-      resolve(); // error loading image
-    } else if (lcpCandidate && !lcpCandidate.complete) {
-      lcpCandidate.setAttribute('loading', 'eager');
-      lcpCandidate.addEventListener('load', resolve);
-      lcpCandidate.addEventListener('error', resolve);
-    } else {
+    if (!lcpCandidate || (lcpCandidate.complete && lcpCandidate.src === 'about:error')) {
       resolve();
     }
+
+    lcpCandidate.setAttribute('loading', 'eager');
+
+    // Firefox-safe path
+    if (lcpCandidate.decode) {
+      lcpCandidate.decode().then(resolve).catch(resolve); // decode rejects on error
+      return;
+    }
+
+    lcpCandidate.addEventListener('load', resolve, { once: true });
+    lcpCandidate.addEventListener('error', resolve, { once: true });
   });
 }
 
@@ -651,6 +689,7 @@ export function decorateMain(main, isFragment = false) {
   decorateSections(main);
   decorateBlocks(main);
   buildSectionBasedAutoBlocks(main);
+  decorateLinksWithinSection(main);
 }
 
 /**
@@ -690,8 +729,8 @@ export function getConfig() {
       env: 'PROD',
       cdn: 'experienceleague.adobe.com',
       authorUrl: 'author-p122525-e1219150.adobeaemcloud.com',
-      hlxPreview: /^([a-z0-9-]+)--exlm-prod--adobe-experience-league.hlx.page$/,
-      hlxLive: /^([a-z0-9-]+)--exlm-prod--adobe-experience-league.hlx.live$/,
+      hlxPreview: /^([a-z0-9-]+)--exlm-prod--adobe-experience-league.(hlx|aem).page$/,
+      hlxLive: /^([a-z0-9-]+)--exlm-prod--adobe-experience-league.(hlx|aem).live$/,
       community: 'experienceleaguecommunities.adobe.com',
     },
     {
@@ -700,7 +739,7 @@ export function getConfig() {
       authorUrl: 'author-p122525-e1219192.adobeaemcloud.com',
       hlxPreview: /^([a-z0-9-]+)--exlm-stage--adobe-experience-league.(hlx|aem).page$/,
       hlxLive: /^([a-z0-9-]+)--exlm-stage--adobe-experience-league.(hlx|aem).live$/,
-      community: 'experienceleaguecommunities-dev.adobe.com',
+      community: 'experienceleaguecommunities-beta.adobe.com',
     },
     {
       env: 'DEV',
@@ -708,37 +747,54 @@ export function getConfig() {
       authorUrl: 'author-p122525-e1200861.adobeaemcloud.com',
       hlxPreview: /^([a-z0-9-]+)--exlm--adobe-experience-league.(hlx|aem).page$/,
       hlxLive: /^([a-z0-9-]+)--exlm--adobe-experience-league.(hlx|aem).live$/,
-      community: 'experienceleaguecommunities-dev.adobe.com',
+      community: 'experienceleaguecommunities-beta.adobe.com',
     },
   ];
 
   const baseLocalesMap = new Map([
     ['de', 'de'],
-    ['en', 'en'],
-    ['ja', 'ja'],
     ['fr', 'fr'],
     ['es', 'es'],
-    ['pt-br', 'pt'],
-    ['ko', 'ko'],
   ]);
 
   const communityLangsMap = new Map([
     ...baseLocalesMap,
     ['sv', 'en'],
     ['nl', 'en'],
+    ['zh-hans', 'zh'],
+    ['zh-hant', 'zh'],
+    ['pt-br', 'pt'],
+    ['ja', 'ja'],
+    ['ko', 'ko'],
+    ['en', 'en'],
     ['it', 'en'],
-    ['zh-hans', 'en'],
-    ['zh-hant', 'en'],
   ]);
 
   const adobeAccountLangsMap = new Map([
     ...baseLocalesMap,
     ['sv', 'sv'],
     ['nl', 'nl'],
-    ['it', 'it'],
     ['zh-hant', 'zh-Hant'],
     ['zh-hans', 'zh-Hans'],
+    ['pt-br', 'pt'],
+    ['ja', 'ja'],
+    ['ko', 'ko'],
+    ['en', 'en'],
+    ['it', 'it'],
   ]);
+
+  const plCommunityLangsMap = new Map([
+    ['en-US', 'en'],
+    ['de-DE', 'de'],
+    ['es-ES', 'es'],
+    ['fr-FR', 'fr'],
+    ['ja-JP', 'ja'],
+    ['pt-PT', 'pt'],
+    ['ko-KR', 'ko'],
+    ['zh-CN', 'zh-hans'],
+    ['zh-TW', 'zh-hant'],
+  ]);
+
   const cookieConsentName = 'OptanonConsent';
   const targetCriteriaIds = {
     mostPopular: 'exl-hp-auth-recs-2',
@@ -754,7 +810,13 @@ export function getConfig() {
   const cdnHost = currentEnv?.cdn || defaultEnv.cdn;
   const communityHost = currentEnv?.community || defaultEnv.community;
   const cdnOrigin = `https://${cdnHost}`;
-  const lang = document.querySelector('html').lang || 'en';
+  const premiumLearningAuthAPI = `${cdnOrigin}/api/v1/web/alm/authentication`;
+  const rawLang = document.querySelector('html').lang || 'en';
+  const lang = window.location.hostname.includes(communityHost)
+    ? plCommunityLangsMap.get(rawLang) || rawLang.split('-')[0]
+    : rawLang;
+  // Premium Learning is not offered for nl/sv locales; use English PL home until those languages are deprecated.
+  const premiumHomeLang = lang === 'nl' || lang === 'sv' ? 'en' : lang;
   // Locale param for Community page URL
   const communityLocale = communityLangsMap.get(lang) || 'en';
   // Lang param for Adobe account URL
@@ -774,6 +836,18 @@ export function getConfig() {
   else if (isStage)
     launchScriptSrc = 'https://assets.adobedtm.com/d4d114c60e50/9f881954c8dc/launch-102059c3cf0a-staging.min.js';
   else launchScriptSrc = 'https://assets.adobedtm.com/d4d114c60e50/9f881954c8dc/launch-caabfb728852-development.js';
+  let plPrivateCatalogIds;
+  let plPublicCatalogIds;
+  if (isProd) {
+    plPrivateCatalogIds = ['208912'];
+    plPublicCatalogIds = ['208913'];
+  } else if (isStage) {
+    plPrivateCatalogIds = ['208426'];
+    plPublicCatalogIds = ['208427'];
+  } else {
+    plPrivateCatalogIds = ['208424'];
+    plPublicCatalogIds = ['208425'];
+  }
   const signUpFlowConfigDate = '2024-08-15T00:00:00.762Z';
   const modalReDisplayDuration = '3'; // in months
 
@@ -792,18 +866,21 @@ export function getConfig() {
     modalReDisplayDuration,
     cookieConsentName,
     targetCriteriaIds,
+    premiumLearningAuthAPI,
     quizPassingCriteria: 0.65, // 65% passing criteria for quizzes
-    khorosProfileUrl: `${cdnOrigin}/api/action/khoros/profile-menu-list`,
-    khorosProfileDetailsUrl: `${cdnOrigin}/api/action/khoros/profile-details`,
+    khorosProfileUrl: `${cdnOrigin}/api/action/khoros/profile-menu-list?platform=gainsight`,
+    khorosProfileDetailsUrl: `${cdnOrigin}/api/action/khoros/profile-details?platform=gainsight`,
     profileUrl: `${cdnOrigin}/api/profile?lang=${lang}`,
     JWTTokenUrl: `${cdnOrigin}/api/token?lang=${lang}`,
-    coveoTokenUrl: `${cdnOrigin}/api/coveo-token?lang=${lang}`,
+    coveoTokenUrl: `${cdnOrigin}/api/action/coveo-token?lang=${lang}`,
     coveoSearchResultsUrl: isProd
       ? 'https://platform.cloud.coveo.com/rest/search/v2'
       : 'https://adobesystemsincorporatednonprod1.org.coveo.com/rest/search/v2',
     coveoOrganizationId: isProd ? 'adobev2prod9e382h1q' : 'adobesystemsincorporatednonprod1',
-    coveoToken: isProd ? 'xx937144af-8882-494f-8a5e-96460f4f25d4' : 'xxcfe1b6e9-3628-49b5-948d-ed50d3fa6c99',
     upcomingEventsUrl: `${prodAssetsCdnOrigin}/thumb/upcoming-events.json`,
+    plPrivateCatalogIds,
+    plPublicCatalogIds,
+    plApiBaseUrl: 'https://learningmanager.adobe.com/primeapi/v2',
     adlsUrl: 'https://learning.adobe.com/courses.result.json',
     industryUrl: `${cdnOrigin}/api/industries?page_size=200&sort=Order&lang=${lang}`,
     articleUrl: `${cdnOrigin}/api/articles`,
@@ -823,16 +900,25 @@ export function getConfig() {
       : `https://stage.account.adobe.com/?lang=${adobeAccountLang}`,
     // Community Account URL
     communityAccountURL: isProd
-      ? `https://experienceleaguecommunities.adobe.com/?profile.language=${communityLocale}`
-      : `https://experienceleaguecommunities-dev.adobe.com/?profile.language=${communityLocale}`,
+      ? `https://experienceleaguecommunities.adobe.com/?lang=${communityLocale}`
+      : `https://experienceleaguecommunities-beta.adobe.com/?lang=${communityLocale}`,
     interestsUrl: `${cdnOrigin}/api/interests?page_size=200&sort=Order`,
     // Param for localized Community Profile URL
-    localizedCommunityProfileParam: `?profile.language=${communityLocale}`,
-    communityTopicsUrl: isProd
-      ? `https://experienceleaguecommunities.adobe.com//t5/custom/page/page-id/Community-TopicsPage?profile.language=${communityLocale}&topic=`
-      : `https://experienceleaguecommunities-dev.adobe.com//t5/custom/page/page-id/Community-TopicsPage?profile.language=${communityLocale}&topic=`,
+    localizedCommunityProfileParam: `?lang=${communityLocale}`,
     // MPC API Base
     mpcApiBase: `https://api.tv.adobe.com/videos`,
+    // Events Page URL
+    eventsURL: `${cdnOrigin}/${lang}/events`,
+    // Premium Learning home (for premium learner nav link)
+    premiumHomeUrl: `${cdnOrigin}/${premiumHomeLang}/premium/home`,
+    // Brand Concierge
+    bcDatastreamId: '87ae6de9-a49c-4734-a88a-17ec707ded09',
+    bcOrgId: 'E4722728699EC56A0A495CA2@AdobeOrg',
+    bcAlloySdkUrl: 'https://cdn1.adoberesources.net/alloy/2.31.1/alloy.min.js',
+    bcWebClientUrl:
+      'https://experience.adobe.net/solutions/experience-platform-brand-concierge-web-agent/static-assets/main.js',
+    bcEdgeDomain: 'edge.adobedc.net',
+    bcAuthRequired: true,
   };
   return window.exlm.config;
 }
@@ -880,6 +966,9 @@ export const URL_SPECIAL_CASE_LOCALES = new Map([
   ['zh-hant', 'zh-TW'],
 ]);
 
+// TODO: Move loadIms() out of scripts.js into a dedicated  utility .
+// and import it from there. Its current location causes a cyclic dependency because
+// premium-learning-utils.js → profile.js → scripts.js → premium-learning-utils.js.
 export async function loadIms() {
   // if adobe IMS was loaded already, return. Especially useful when embedding this code outside this site.
   // eg. embedding header in community which has it's own IMS setup.
@@ -914,7 +1003,7 @@ const loadMartech = async (headerPromise, footerPromise) => {
   // eslint-disable-next-line import/no-cycle
   const libAnalyticsPromise = import('./analytics/lib-analytics.js');
   libAnalyticsPromise.then(async (libAnalyticsModule) => {
-    const { pushPageDataLayer, pushLinkClick } = libAnalyticsModule;
+    const { pushPageDataLayer, pushLinkClick, handleComponentClick, setupComponentImpressions } = libAnalyticsModule;
     const { lang } = getPathDetails();
 
     try {
@@ -926,12 +1015,31 @@ const loadMartech = async (headerPromise, footerPromise) => {
       // eslint-disable-next-line no-console
       console.error('Error getting pageLoadModel:', e);
     }
+
+    if (isFeatureEnabled('isComponentImpressionEnabled')) {
+      setupComponentImpressions();
+    }
+
     Promise.allSettled([headerPromise, footerPromise]).then(() => {
       const linkClicked = document.querySelectorAll('a,.view-more-less span, .language-selector-popover span');
       const clickHandler = (e) => {
-        if (e.target.tagName === 'A' || e.target.tagName === 'SPAN') pushLinkClick(e);
+        if (e.target.tagName === 'A' || e.target.tagName === 'SPAN') {
+          // Check if click is within a component (block)
+          const component = e.target.closest('[data-block-name]');
+          if (component) {
+            // Fire componentClick for block clicks
+            handleComponentClick(e);
+          } else {
+            // Fire linkClick for non-component clicks (header, footer, text links, etc)
+            pushLinkClick(e);
+          }
+        }
       };
       linkClicked.forEach((e) => e.addEventListener('click', clickHandler));
+      const headerEl = document.querySelector('exl-header');
+      headerEl?.shadowRoot?.addEventListener('click', clickHandler);
+      const footerEl = document.querySelector('exl-footer');
+      footerEl?.shadowRoot?.addEventListener('click', clickHandler);
     });
   });
 
@@ -944,9 +1052,26 @@ const loadMartech = async (headerPromise, footerPromise) => {
     async: true,
   });
 
+  const footerRenderPromise = footerPromise.then(
+    () =>
+      new Promise((resolve) => {
+        if (document.querySelector('[href="#onetrust"]')) {
+          // Element exists - resolve immediately.
+          resolve();
+          return;
+        }
+
+        // Otherwise wait for footer-ready event
+        const handler = () => {
+          document.removeEventListener('footer-ready', handler);
+          resolve();
+        };
+        document.addEventListener('footer-ready', handler);
+      }),
+  );
+
   // footer and one trust loaded, add event listener to open one trust popup,
-  // footer and one trust loaded, add event listener to open one trust popup,
-  Promise.all([footerPromise, oneTrustPromise]).then(() => {
+  Promise.all([footerRenderPromise, oneTrustPromise]).then(() => {
     document.querySelector('[href="#onetrust"]').addEventListener('click', (e) => {
       e.preventDefault();
       window.adobePrivacy.showConsentPopup();
@@ -969,14 +1094,33 @@ async function loadThemes() {
   return Promise.allSettled(themeNames.map((theme) => loadCSS(`${window.hlx.codeBasePath}/styles/theme/${theme}.css`)));
 }
 
+/** load and execute the default export of the given js module path */
+async function loadDefaultModule(jsPath) {
+  try {
+    const mod = await import(jsPath);
+    if (mod.default) await mod.default();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.log(`failed to load module for ${jsPath}`, error);
+  }
+}
+
 /**
  * Loads everything that doesn't need to be delayed.
  * @param {Element} doc The container element
  */
+
 async function loadLazy(doc) {
   const main = doc.querySelector('main');
   const preMain = doc.body.querySelector(':scope > aside');
   loadIms(); // start it early, asyncronously
+
+  // Prefetch Coveo token early (non-blocking, parallel with blocks)
+  // All pages use Coveo for header search query suggestions
+  // Uses requestIdleCallback to avoid blocking - token ready before user interacts
+
+  loadDefaultModule('./data-service/coveo/coveo-token-prefetch.js');
+
   await loadThemes();
   if (preMain) await loadBlocks(preMain);
   await loadBlocks(main);
@@ -989,6 +1133,9 @@ async function loadLazy(doc) {
   // disable martech if martech=off is in the query string, this is used for testing ONLY
   if (window.location.search?.indexOf('martech=off') === -1) loadMartech(headerPromise, footerPromise);
   loadCSS(`${window.hlx.codeBasePath}/styles/lazy-styles.css`);
+  if (isLiveGradientBgPage) {
+    loadDefaultModule('./page-bg-gradient/page-bg-gradient.js');
+  }
   loadFonts();
 }
 
@@ -1015,6 +1162,36 @@ export function createTag(tag, attributes, html) {
 }
 
 /**
+ * Enables image enlargement functionality for all picture elements on the page.
+ * Sets up click event listeners that load the image in a modal overlay.
+ */
+let imageModalLoader;
+
+async function loadImageModal() {
+  if (!imageModalLoader) {
+    imageModalLoader = Promise.all([
+      loadCSS(`${window.hlx.codeBasePath}/styles/image-modal.css`),
+      import('./image-modal.js'),
+    ]);
+  }
+  return imageModalLoader;
+}
+
+export function openImageModal() {
+  document.querySelectorAll('picture').forEach((picture) => {
+    picture?.setAttribute('modal', 'regular');
+
+    picture?.addEventListener('click', async () => {
+      const img = picture?.querySelector('img');
+      if (!img) return;
+
+      const [, mod] = await loadImageModal();
+      mod.default(img);
+    });
+  });
+}
+
+/**
  * Loads everything that happens a lot later,
  * without impacting the user experience.
  */
@@ -1024,22 +1201,11 @@ function loadDelayed() {
   // load anything that can be postponed to the latest here
 }
 
-/** load and execute the default export of the given js module path */
-async function loadDefaultModule(jsPath) {
-  try {
-    const mod = await import(jsPath);
-    if (mod.default) await mod.default();
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.log(`failed to load module for ${jsPath}`, error);
-  }
-}
-
 /**
  * Custom - Loads the right and left rails for doc pages only.
  */
 async function loadRails() {
-  if (isDocPage) {
+  if (isDocPage || isOnDemandEventPage) {
     loadCSS(`${window.hlx.codeBasePath}/scripts/rails/rails.css`);
     loadDefaultModule('./rails/rails.js');
   }
@@ -1052,6 +1218,7 @@ export async function loadArticles() {
   if (isPerspectivePage) {
     loadCSS(`${window.hlx.codeBasePath}/scripts/articles/articles.css`);
     loadDefaultModule('./articles/articles.js');
+    openImageModal();
   }
 }
 
@@ -1089,7 +1256,7 @@ export async function fetchFragment(rePath, lang) {
 
 /** fetch fragment relative to /${lang}/global-fragments/ */
 export async function fetchGlobalFragment(metaName, fallback, lang) {
-  const fragmentPath = getMetadata(metaName) ?? fallback;
+  const fragmentPath = getMetadata(metaName) || fallback;
   const fragmentUrl = fragmentPath?.startsWith('/en/') ? fragmentPath.replace('/en/', `/${lang}/`) : fallback;
   const path = `${window.hlx.codeBasePath}${fragmentUrl}.plain.html`;
   const fallbackPath = `${window.hlx.codeBasePath}${fallback}.plain.html`;
@@ -1101,7 +1268,10 @@ export async function fetchGlobalFragment(metaName, fallback, lang) {
 export async function fetchLanguagePlaceholders(lang) {
   const { communityHost } = getConfig();
   const isCommunityDomain = window.location.origin.includes(communityHost);
-  const communityLang = new Map([['pt', 'pt-br']]);
+  const communityLang = new Map([
+    ['pt', 'pt-br'],
+    ['zh', 'zh-hans'],
+  ]);
 
   const langCode =
     lang ||
@@ -1308,58 +1478,91 @@ export function setMetadata(name, content) {
 }
 
 /**
- * Update TQ Tags metadata directly in meta tags
+ * Update Legacy and TQ Tags metadata when isV2TagsEnabled FF is enabled
  * @param {Document} document
  */
-export function updateTQTagsForCoveo() {
-  const keyMapping = {
-    'tq-roles': 'role',
-    'tq-levels': 'level',
-    'tq-products': 'coveo-solution',
-    'tq-features': 'feature',
-    'tq-subfeatures': 'sub-feature',
-    'tq-industries': 'industry',
-    'tq-topics': 'topic',
+export function updateLegacyAndV2Tags() {
+  // First, migrate legacy tags to _v1
+  const legacyToV1Mapping = {
+    role: 'role_v1',
+    level: 'level_v1',
+    'coveo-solution': 'product_v1',
+    feature: 'feature_v1',
+    'sub-feature': 'subfeature_v1',
+    industry: 'industry_v1',
+    topic: 'topic_v1',
   };
 
-  Object.entries(keyMapping).forEach(([originalName, metaName]) => {
-    const metaTag = document.querySelector(`meta[name="${originalName}"]`);
-    if (!metaTag) return;
-
-    try {
-      const decoded = decodeHtmlEntities(metaTag.content);
-      const parsed = JSON.parse(decoded);
-
-      if (Array.isArray(parsed)) {
-        const separator = originalName === 'tq-products' ? ';' : ',';
-        const labels = [...new Set(parsed.map((item) => item.label?.trim()).filter(Boolean))].join(separator);
-
-        if (labels) {
-          setMetadata(metaName, labels);
-        }
-      }
-    } catch (e) {
-      console.error(`Failed to parse metadata for ${originalName}:`, e, metaTag);
+  Object.entries(legacyToV1Mapping).forEach(([legacyKey, v1Key]) => {
+    const value = getMetadata(legacyKey);
+    if (value) {
+      setMetadata(v1Key, value);
     }
+  });
+
+  // Then, migrate _v2 tags to legacy (without suffix)
+  const v2ToLegacyMapping = {
+    role_v2: 'role',
+    level_v2: 'level',
+    product_v2: 'coveo-solution',
+    feature_v2: 'feature',
+    subfeature_v2: 'sub-feature',
+    industry_v2: 'industry',
+    topic_v2: 'topic',
+  };
+
+  Object.entries(v2ToLegacyMapping).forEach(([sourceKey, targetKey]) => {
+    const value = getMetadata(sourceKey);
+    if (!value) return;
+
+    let formatted = value.trim();
+
+    // Only product needs different separator
+    if (sourceKey === 'product_v2') {
+      formatted = formatted
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(';');
+    }
+
+    setMetadata(targetKey, formatted);
+  });
+
+  // Remove _v2 tags after processing
+  const v2TagsToRemove = [
+    'role_v2',
+    'level_v2',
+    'product_v2',
+    'feature_v2',
+    'subfeature_v2',
+    'industry_v2',
+    'topic_v2',
+  ];
+
+  v2TagsToRemove.forEach((tag) => {
+    const metaTags = document.head.querySelectorAll(`meta[name="${tag}"]`);
+    metaTags.forEach((metaTag) => metaTag.remove());
   });
 }
 
 /**
  * Update TQ Tags metadata
+ * Converts JSON metadata -> label-only metadata
  * @param {Document} document
  */
 export function updateTQTagsMetadata() {
-  const keysToUpdate = [
-    'tq-roles',
-    'tq-levels',
-    'tq-products',
-    'tq-features',
-    'tq-subfeatures',
-    'tq-industries',
-    'tq-topics',
-  ];
+  const keyMapping = {
+    'tq-roles': 'role_v2',
+    'tq-levels': 'level_v2',
+    'tq-products': 'product_v2',
+    'tq-features': 'feature_v2',
+    'tq-subfeatures': 'subfeature_v2',
+    'tq-industries': 'industry_v2',
+    'tq-topics': 'topic_v2',
+  };
 
-  keysToUpdate.forEach((key) => {
+  Object.entries(keyMapping).forEach(([key, newKey]) => {
     const metaTag = getMetadata(key);
     if (!metaTag) return;
 
@@ -1368,26 +1571,47 @@ export function updateTQTagsMetadata() {
       const parsed = JSON.parse(decoded);
 
       if (Array.isArray(parsed)) {
-        const updatedTags = parsed
-          .map((item) => (item.uri && item.label ? `${item.uri}|${item.label}` : null))
+        const labels = parsed
+          .map((item) => item?.label)
           .filter(Boolean)
           .join(', ');
-        if (updatedTags) {
-          setMetadata(`${key}`, updatedTags);
-          // Extract labels (the part after |) and join by comma
-          const labels = updatedTags
-            .split(',')
-            .map((tag) => tag.split('|')[1]?.trim())
-            .filter(Boolean)
-            .join(', ');
 
-          setMetadata(`${key}-labels`, labels);
+        if (labels) {
+          setMetadata(newKey, labels);
         }
       }
     } catch (e) {
-      console.error(`Failed to parse metadata for ${key}:`, e);
+      console.error(`Failed to parse metadata for ${key}:`, e, metaTag);
     }
   });
+}
+
+/**
+ * Extracts and returns a comma-separated string of label values from a JSON-encoded tag string.
+ * @param {string} tag - A JSON string (possibly HTML-encoded) representing an array of objects with `label` properties.
+ * @returns {string} A comma-separated string of labels, or an empty string if parsing fails or input is invalid.
+ */
+export function getv2TagLabels(tag) {
+  if (!tag) return '';
+
+  let labels = '';
+
+  try {
+    const decoded = decodeHtmlEntities(tag);
+    const parsed = JSON.parse(decoded);
+
+    if (Array.isArray(parsed)) {
+      labels = parsed
+        .map((item) => item?.label)
+        .filter(Boolean)
+        .join(', ');
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to parse tag:', e, tag);
+  }
+
+  return labels;
 }
 
 /**
@@ -1401,7 +1625,7 @@ export async function fetchJson(url, fallbackUrl) {
 }
 
 export function xssSanitizeQueryParamValue(value) {
-  return value?.replace(/[^a-zA-Z0-9\s.]/g, '');
+  return value?.replace(/[^a-zA-Z0-9\s.|]/g, '');
 }
 
 export function getCookie(cookieName) {
@@ -1481,7 +1705,7 @@ async function loadPage() {
   await loadLazy(document);
   loadDelayed();
   await showSignupDialog();
-  if (window.hlx.aemRoot || window.location.href.includes('.html')) {
+  if (isUEMode) {
     loadDefaultModule(`${window.hlx.codeBasePath}/scripts/editor-support-seo.js`);
   }
   if (isDocPage) {
@@ -1503,10 +1727,14 @@ async function loadPage() {
   if (window.hlx.DO_NOT_LOAD_PAGE) return;
 
   // For AEM Author mode, decode the tags value
-  if (window.hlx.aemRoot || window.location.href.includes('.html')) {
+  if (isUEMode) {
     decodeAemCqMetaTags();
     updateTQTagsMetadata();
     decodeAemPageMetaTags();
+
+    if (isFeatureEnabled('isV2TagsEnabled')) {
+      updateLegacyAndV2Tags();
+    }
   }
 
   const { suffix: currentPagePath, lang } = getPathDetails();
@@ -1543,10 +1771,36 @@ async function loadPage() {
     } else {
       const signedIn = await isUserSignedIn();
       if (signedIn) {
-        // Applying data-cs-mask for signed-in profile-settings page
-        if (window.location.pathname === `/${lang}/home/profile-settings`) {
-          document.body.setAttribute('data-cs-mask', '');
-        }
+        // Non-blocking — timeout is handled inside isPLEligible().
+        import('./utils/premium-learning-utils.js')
+          .then(({ isPLEligible }) => isPLEligible(signedIn))
+          .then(async (plMember) => {
+            // Only fetch enrollments if user is BOTH a PL member AND on profile page
+            if (plMember && isProfilePage) {
+              // TODO: Guard this fetch behind a check that the PL blocks are actually present
+              // in the DOM before firing — avoids an unnecessary API call on profile pages
+              // that have no PL content blocks.
+              const { hasActiveEnrollments } = await import('./data-service/premium-learning-data-service.js');
+              const config = getConfig();
+              const hasEnrollments = await hasActiveEnrollments(config);
+
+              const activeContentBlock = document.querySelector('.premium-learning-active-content');
+              const suggestedContentBlock = document.querySelector('.premium-learning-suggested-content');
+
+              if (hasEnrollments) {
+                // User has active enrollments - remove suggested content block wrapper
+                suggestedContentBlock?.parentElement?.remove();
+              } else {
+                // User has no active enrollments - remove active content block wrapper
+                activeContentBlock?.parentElement?.remove();
+              }
+            }
+          })
+          .catch((error) => {
+            // eslint-disable-next-line no-console
+            console.error('Error resolving Premium Learning membership:', error);
+          });
+
         loadPage();
         loadTarget(signedIn);
       } else {
@@ -1571,6 +1825,37 @@ async function loadPage() {
   const containsAtomicSearch = !!document.querySelector(`main .atomic-search`);
   if (containsAtomicSearch) {
     initiateCoveoAtomicSearch();
+  }
+  // Initialize Premium Learning auth — fully non-blocking, does not delay loadPage().
+  if (isFeatureEnabled('isPremiumLearningEnabled')) {
+    if (isUEMode) {
+      // getConfig() must be called before the import resolves. In non-UE mode this is
+      // guaranteed by isUserSignedIn() → loadIms() → getConfig(). In UE mode there is
+      // no such gate, so a cached module import can resolve before loadLazy() ever calls
+      // getConfig(), leaving window.exlm.config undefined and causing exchangePLToken to
+      // silently no-op. Calling it here is synchronous and idempotent — no effect on non-UE.
+      getConfig();
+      // UE Author Mode: fetch PL token anonymously via ?auth=false (no IMS required).
+      import('./utils/premium-learning-utils.js')
+        .then(({ initPLAuthAnonymous }) => initPLAuthAnonymous())
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error('Error initializing PL auth in UE Author Mode:', error);
+        });
+    } else {
+      // TODO: Remove isUserSignedIn call and move signedIn check to isPLEligible function once cyclic dependency is resolved.
+      isUserSignedIn()
+        .then((signedIn) =>
+          import('./utils/premium-learning-utils.js').then(({ applyPLSectionGating }) =>
+            applyPLSectionGating(signedIn),
+          ),
+        )
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error('Error initializing Premium Learning authentication:', error);
+          document.querySelectorAll('.premium-learning-section').forEach((s) => s.remove());
+        });
+    }
   }
 
   if (isProfilePage) {

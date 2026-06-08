@@ -87,6 +87,8 @@ export const getCardData = async (articlePath, placeholders) => {
     solutions = coveoSolution.split(';').map((s) => s.trim());
   }
   const viewLinkPlaceholderKey = `browseCard${convertToTitleCase(type)}ViewLabel`.replace(/\s+/g, '');
+  const eventSeries = getMetadata('series', doc);
+  const eventTime = getMetadata('promostarttime', doc);
 
   return {
     id: getMetadata('id', doc),
@@ -110,6 +112,16 @@ export const getCardData = async (articlePath, placeholders) => {
     bookmarkLink: '',
     viewLink: fullURL,
     viewLinkText: placeholders[viewLinkPlaceholderKey] ? placeholders[viewLinkPlaceholderKey] : `View ${type}`,
+    // Course-specific metadata
+    el_level: getMetadata('level', doc),
+    el_course_duration: getMetadata('course-duration', doc),
+    el_course_module_count: getMetadata('course-module-count', doc),
+
+    /* TODO - add duration */
+    event: {
+      series: eventSeries,
+      time: eventTime,
+    },
   };
 };
 
@@ -193,6 +205,29 @@ export const createDateCriteria = (dateList) => {
   });
   return dateCriteria;
 };
+
+export function getCardHeaderAndPosition(card, element) {
+  let cardHeader = '';
+  const currentBlock = card.closest('.block');
+  const headerEl = currentBlock?.querySelector(
+    '.browse-cards-block-title, .rec-block-header, .inprogress-courses-header-wrapper',
+  );
+  if (headerEl) {
+    const cloned = headerEl.cloneNode(true);
+    cloned.querySelectorAll('[data-cs-mask]').forEach((el) => el.remove());
+    cardHeader = cloned.innerText.trim();
+  }
+
+  cardHeader = cardHeader || currentBlock?.getAttribute('data-block-name')?.trim() || '';
+
+  let cardPosition = '';
+  if (element?.parentElement?.children) {
+    const siblings = Array.from(element.parentElement.children);
+    cardPosition = String(siblings.indexOf(element) + 1);
+  }
+
+  return { cardHeader, cardPosition };
+}
 
 // Function to convert a string to title case
 export const formatTitleCase = (str) => str.replace(/[-\s]/g, '').replace(/\b\w/g, (match) => match.toUpperCase());

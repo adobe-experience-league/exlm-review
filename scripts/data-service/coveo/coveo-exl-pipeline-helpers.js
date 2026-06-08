@@ -4,6 +4,7 @@ import CoveoDataService from './coveo-data-service.js';
 import { CONTENT_TYPES, COMMUNITY_SEARCH_FACET } from './coveo-exl-pipeline-constants.js';
 
 const { coveoSearchResultsUrl } = getConfig();
+const MAX_NUMBER_OF_VALUES_PER_BATCH = 100;
 
 // Most of these are copied from an existing call. I do not believe we need all of them, so this list could probably be pruned.
 const fieldsToInclude = [
@@ -73,18 +74,58 @@ function contructDateAdvancedQuery(dateCriteria) {
  * @returns {Array} Array of Coveo facet objects.
  * @private
  */
-function constructCoveoFacet(facets) {
-  const facetsArray = facets.map((facet) => ({
-    facetId: `@${facet.id}`,
-    field: facet.id,
-    type: facet.type,
-    numberOfValues: facet.currentValues?.length || 2,
-    currentValues: facet.currentValues.map((value) => ({
-      value,
-      state: value === CONTENT_TYPES.COMMUNITY.MAPPING_KEY ? 'idle' : 'selected',
-      ...(value === CONTENT_TYPES.COMMUNITY.MAPPING_KEY ? { children: COMMUNITY_SEARCH_FACET } : []),
-    })),
-  }));
+function constructCoveoFacet(facets, param) {
+  const facetsArray = facets.map((facet) => {
+    const facetObject = {
+      facetId: `@${facet.id}`,
+      field: facet.id,
+      type: facet.type,
+    };
+    const allFacetsExist = param[`${facet.id}_all`]?.length > 0;
+    const sourceValues = allFacetsExist ? param[`${facet.id}_all`] : facet.currentValues || [];
+    facetObject.numberOfValues = sourceValues.length || 2;
+
+    facetObject.currentValues = sourceValues.map((value) => {
+      let isSelected = false;
+      if (value !== CONTENT_TYPES.COMMUNITY.MAPPING_KEY) {
+        if (facet.currentValues?.includes(value)) {
+          isSelected = true;
+        } else if (
+          allFacetsExist &&
+          facet.currentValues?.some((cv) => cv?.replace(/\|/g, '') === value?.replace(/\|/g, ''))
+        ) {
+          isSelected = true;
+        }
+      }
+
+      return {
+        value,
+        state: isSelected ? 'selected' : 'idle',
+        ...(value === CONTENT_TYPES.COMMUNITY.MAPPING_KEY ? { children: COMMUNITY_SEARCH_FACET } : {}),
+      };
+    });
+
+    return facetObject;
+  });
+  Object.keys(param).forEach((paramKey) => {
+    if (!paramKey.endsWith('_all')) return;
+
+    const facetKey = paramKey.replace('_all', '');
+    const facetExists = facetsArray.some((facetDetail) => facetDetail.field === facetKey);
+    if (facetExists) return;
+
+    const listOfValues = param[paramKey];
+    facetsArray.push({
+      facetId: `@${facetKey}`,
+      field: facetKey,
+      type: 'specific',
+      currentValues: listOfValues.map((value) => ({
+        value,
+        state: 'idle',
+      })),
+      numberOfValues: listOfValues.length || 2,
+    });
+  });
   return facetsArray;
 }
 
@@ -98,8 +139,10 @@ function constructCoveoAdvancedQuery(param) {
   const contentTypeQuery = param.contentType
     ? `AND (${param.contentType.map((type) => `@el_contenttype=="${type}"`).join(' OR ')})`
     : '';
+
+  // Handle product with OR logic to search both el_product and el_solution fields
   const productQuery = param.product
-    ? `AND (${param.product.map((type) => `@el_product=="${type}"`).join(' OR ')})`
+    ? `AND (${param.product.map((type) => `(@el_product=="${type}" OR @el_solution=="${type}")`).join(' OR ')})`
     : '';
   const versionQuery = param.version
     ? `AND (${param.version.map((type) => `@el_version=="${type}"`).join(' OR ')})`
@@ -130,13 +173,15 @@ export function getFacets(param) {
         ]
       : []),
     ...(param.product ? [{ id: 'el_product', type: 'specific', currentValues: param.product }] : []),
+    ...(param.solutions ? [{ id: 'el_solution', type: 'specific', currentValues: param.solutions }] : []),
     ...(param.version ? [{ id: 'el_version', type: 'specific', currentValues: param.version }] : []),
     ...(param.role ? [{ id: 'el_role', type: 'specific', currentValues: param.role }] : []),
     ...(param.authorType ? [{ id: 'author_type', type: 'specific', currentValues: param.authorType }] : []),
     ...(param.level ? [{ id: 'el_level', type: 'specific', currentValues: param.level }] : []),
+    ...(param.eventSeries ? [{ id: 'el_event_series', type: 'specific', currentValues: param.eventSeries }] : []),
   ];
 
-  return constructCoveoFacet(facets);
+  return constructCoveoFacet(facets, param);
 }
 
 export function getExlPipelineDataSourceParams(param, fields = fieldsToInclude) {
@@ -167,6 +212,9 @@ export function getExlPipelineDataSourceParams(param, fields = fieldsToInclude) 
       ...(!param.feature ? { facets: getFacets(param) } : ''),
       ...(param.feature ? { aq: constructCoveoAdvancedQuery(param) } : ''),
       ...(param.aq ? { aq: param.aq } : ''),
+      ...(param.fields?.length > 0
+        ? { batch: param.fields.map((field) => ({ field, maximumNumberOfValues: MAX_NUMBER_OF_VALUES_PER_BATCH })) }
+        : ''),
       fieldsToInclude: fields,
     },
   };
@@ -174,6 +222,10 @@ export function getExlPipelineDataSourceParams(param, fields = fieldsToInclude) 
   // Set to select page
   if (param.firstResult) {
     dataSource.param.firstResult = param.firstResult;
+  }
+
+  if (param.fetchFacets) {
+    dataSource.url += '/values/batch';
   }
 
   return dataSource;

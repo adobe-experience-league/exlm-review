@@ -1,5 +1,4 @@
 /* eslint-disable no-console */
-
 export const microsite = /^\/(developer|events|landing|overview|tools|welcome)/.test(window.location.pathname);
 const lang = document.querySelector('html').lang || 'en';
 export const search = window.location.pathname === '/search.html' || window.location.pathname === `/${lang}/search`;
@@ -8,26 +7,37 @@ export const courses = document.querySelector('meta[name="theme"]')?.content.inc
 export const browse = document.querySelector('meta[name="theme"]')?.content.includes('browse-') || false;
 export const browseProduct = document.querySelector('meta[name="theme"]')?.content.includes('browse-product') || false;
 export const playlist = window.location.pathname.indexOf('/playlists') !== -1;
-export const solution = document.querySelector('meta[name="solution"]')?.content?.split(',')[0].toLowerCase() || '';
 export const type = document.querySelector('meta[name="type"]')?.content?.toLowerCase() || '';
 
-const fullSolution = document.querySelector('meta[name="solution"]')?.content || '';
-const feature = document.querySelector('meta[name="feature"]')?.content.toLowerCase() || '';
 const featureAttribute = document.querySelector('meta[name="feature-attribute"]')?.content.toLowerCase() || '';
 const subSolution = document.querySelector('meta[name="sub-solution"]')?.content || '';
 const solutionVersion = document.querySelector('meta[name="version"]')?.content || '';
-const role = document.querySelector('meta[name="role"]')?.content || '';
 const docType = document.querySelector('meta[name="doc-type"]')?.content || '';
 const duration = document.querySelector('meta[name="duration"]')?.content || '';
 
-// TQ Tags
-const productV2 = document.querySelector('meta[name="tq-products-labels"]')?.content || '';
-const subFeatureV2 = document.querySelector('meta[name="tq-subfeatures-labels"]')?.content.toLowerCase() || '';
-const featureV2 = document.querySelector('meta[name="tq-features-labels"]')?.content.toLowerCase() || '';
-const roleV2 = document.querySelector('meta[name="tq-roles-labels"]')?.content || '';
-const levelV2 = document.querySelector('meta[name="tq-levels-labels"]')?.content || '';
-const topicV2 = document.querySelector('meta[name="tq-topics-labels"]')?.content || '';
-const industryV2 = document.querySelector('meta[name="tq-industries-labels"]')?.content || '';
+/**
+ * Helper function to get meta tag content
+ * @param {string} name - The name attribute of the meta tag
+ * @returns {string} The content of the meta tag or empty string
+ */
+const getMetaContent = (name) => document.querySelector(`meta[name="${name}"]`)?.content || '';
+
+// TODO: Once the legacy tags are decommissioned, the V2 keys will need to be removed.
+const solution = getMetaContent('solution')?.split(',')[0].toLowerCase() || '';
+const fullSolution = getMetaContent('solution');
+const feature = getMetaContent('feature')?.toLowerCase() || '';
+const role = getMetaContent('role');
+const subFeature = getMetaContent('sub-feature')?.toLowerCase() || '';
+const level = getMetaContent('level');
+const topic = getMetaContent('topic');
+const industry = getMetaContent('industry');
+const productV2 = getMetaContent('product_v2');
+const subFeatureV2 = getMetaContent('subfeature_v2')?.toLowerCase() || '';
+const featureV2 = getMetaContent('feature_v2')?.toLowerCase() || '';
+const roleV2 = getMetaContent('role_v2');
+const levelV2 = getMetaContent('level_v2');
+const topicV2 = getMetaContent('topic_v2');
+const industryV2 = getMetaContent('industry_v2');
 
 const UEFilters = {
   Role: '',
@@ -159,11 +169,17 @@ export async function pushPageDataLayer(language, searchTrackingData) {
     const { defaultProfileClient } = await import('../auth/profile.js');
     const userData = await defaultProfileClient.getMergedProfile();
     if (userData) {
+      // Prefer IMS authId so userID remains stable across org/account switches
+      const stableAuthId = userData?.authId || userData?.userId || '';
+
+      // Detect new signup: true if user hasn't seen signup modal yet
+      const isNewSignUp = !userData.interactions?.some((interaction) => interaction.event === 'modalSeen');
+
       user.userDetails = {
         ...user.userDetails,
         userAccountType: userData.account_type,
         userAuthenticatedStatus: 'logged in',
-        userID: userData.userId || '',
+        userID: stableAuthId,
         userLanguageSetting: userData.preferred_languages || ['en-us'],
         learningInterest: userData.interests || [],
         role: userData.role || [],
@@ -175,13 +191,16 @@ export async function pushPageDataLayer(language, searchTrackingData) {
         org: userData.org || '',
         orgs: userData.orgs || [],
         userCorporateName: userData.orgs.find((o) => o.orgId === userData.org)?.orgName ?? '',
+        newSignUp: isNewSignUp,
       };
 
-      // get a list of all courses titles with awards.timestamp property
-      const coursesWithAwards = (userData?.courses_v2 || [])
-        .filter((course) => course?.awards?.timestamp && course.name)
-        .map((course) => course.name);
-      user.userDetails.courses = coursesWithAwards.length ? coursesWithAwards : [];
+      // get a list of all courses titles and ids with awards.timestamp property
+      // Get arrays of completed courses names and their IDs (where awards.timestamp and course.name exist)
+      const completedCourses = (userData?.courses_v2 || []).filter(
+        (course) => course?.awards?.timestamp && course.name,
+      );
+      user.userDetails.courses = completedCourses.length ? completedCourses.map((course) => course.name) : [];
+      user.userDetails.coursesID = completedCourses.length ? completedCourses.map((course) => course.courseId) : [];
 
       const courseInfo = (userData.courses_v2 || []).find((c) => c.courseId === courseObj?.id);
       if (courseInfo) {
@@ -291,6 +310,12 @@ export async function pushPageDataLayer(language, searchTrackingData) {
       fullSolution,
       feature,
       featureAttribute,
+      subFeature,
+      role,
+      level,
+      topic,
+      industry,
+      // TODO: Once the legacy tags are decommissioned, the V2 keys will need to be removed.
       productV2,
       subFeatureV2,
       featureV2,
@@ -335,6 +360,45 @@ export async function pushPageDataLayer(language, searchTrackingData) {
   }
 }
 
+/**
+ * Generates a component ID in the format: currentURL#componentName
+ */
+export function generateComponentID(componentElement, componentName) {
+  const url = window.location.href.split('#')[0];
+  const components = document.querySelectorAll(`[data-block-name="${componentName}"]`);
+  return components.length <= 1
+    ? `${url}#${componentName}`
+    : `${url}#${componentName}${[...components].indexOf(componentElement) + 1 || 1}`;
+}
+
+export function pushComponentClick(data) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  window.adobeDataLayer.push({
+    event: 'componentClick',
+    component: data.component || '',
+    componentID: data.componentID || '',
+    sectionID: data.sectionID || '',
+    link: {
+      contentType: data.contentType || '',
+      destinationDomain: data.destinationDomain || '',
+      fullSolution: data.fullSolution || '',
+      linkLocation: 'body',
+      linkTitle: data.linkTitle || '',
+      linkType: data.linkType || '',
+      solution: data.solution || '',
+      position: data.position || '',
+      productV2: '',
+      featureV2: '',
+      subFeatureV2: '',
+      topicV2: '',
+      industryV2: '',
+      roleV2: '',
+      levelV2: '',
+    },
+  });
+}
+
 export async function pushLinkClick(e) {
   window.adobeDataLayer = window.adobeDataLayer || [];
 
@@ -348,7 +412,7 @@ export async function pushLinkClick(e) {
     linkLocation = 'toc';
   } else if (e.target.closest('.header')) {
     linkLocation = 'header';
-  } else if (e.target.closest('.footer')) {
+  } else if (e.target.closest('.footer-container')) {
     linkLocation = 'footer';
   } else if (e.target.closest('main') && docs) {
     linkLocation = 'body';
@@ -414,6 +478,59 @@ export async function pushLinkClick(e) {
   });
 }
 
+export function handleComponentClick(e) {
+  const component = e.target.closest('[data-block-name]');
+  if (!component) return;
+
+  // Check if the component is browse card
+  const hasBrowseCardClass = (element) => {
+    if (!element) return false;
+    if (element.classList?.contains('browse-card')) return true;
+    return hasBrowseCardClass(element.parentElement);
+  };
+
+  // Only trigger componentClick for non-browse-card components
+  if (!hasBrowseCardClass(component) && !hasBrowseCardClass(e.target)) {
+    let headerText = '';
+    let currentElement = e.target;
+    while (currentElement && currentElement !== component) {
+      const closestHeader = currentElement.querySelector('h1,h2,h3,h4');
+      if (closestHeader) {
+        headerText = closestHeader.innerText.trim();
+        break;
+      }
+      currentElement = currentElement.parentElement;
+    }
+
+    const componentName = component.dataset.blockName;
+    const componentID = generateComponentID(component, componentName);
+    const gridCard = e.target.closest('.grid-card');
+    const cardPosition = gridCard?.dataset?.cardPosition;
+    const linkTitle = e.target.innerHTML || '';
+    const destinationDomain = e.target.href;
+
+    // Find the section ID that this component belongs to
+    const section = component.closest('.section');
+    const sectionID = section?.dataset?.sectionId || '';
+
+    const componentClickData = {
+      component: componentName,
+      componentID,
+      sectionID,
+      linkTitle,
+      linkType: headerText,
+      destinationDomain,
+    };
+
+    // Only add position for grid-cards component
+    if (componentName === 'grid-cards' && cardPosition) {
+      componentClickData.position = cardPosition;
+    }
+
+    pushComponentClick(componentClickData);
+  }
+}
+
 /**
  * Used to push a video event to the data layer
  * @param {Video} video
@@ -421,7 +538,10 @@ export async function pushLinkClick(e) {
  */
 export function pushVideoEvent(video, event = 'videoPlay') {
   const { title, description, url } = video;
+
   const videoDuration = video.duration || '';
+  const videoSolution = video.solution || solution || '';
+  const videoFullSolution = video.fullSolution || fullSolution || '';
   window.adobeDataLayer = window.adobeDataLayer || [];
 
   window.adobeDataLayer.push({
@@ -431,6 +551,8 @@ export function pushVideoEvent(video, event = 'videoPlay') {
       description,
       url,
       duration: videoDuration,
+      solution: videoSolution,
+      fullSolution: videoFullSolution,
     },
     web: {
       webPageDetails: {
@@ -750,6 +872,7 @@ export function pushCourseCertificateEvent(trackingData) {
       solution: trackingData.solution,
       fullSolution: courseSolutionFull,
       role: trackingData.role,
+      level: trackingData.level || '',
     },
   };
 
@@ -782,13 +905,18 @@ export async function pushCourseCompletionEvent(courseId, currentCourses) {
     }
   }
 
+  const courseFullSolution = courseMeta?.solution || '';
+  const courseSolution = courseFullSolution?.split(',')[0].trim() || '';
+
   window.adobeDataLayer.push({
     event: 'coursesCompleted',
     courses: {
       title: courseMeta?.heading || '',
       id: courseId,
-      solution: courseMeta?.solution || '',
+      solution: courseSolution,
+      fullSolution: courseFullSolution,
       role: courseMeta?.role || '',
+      level: courseMeta?.level || '',
       finishTime,
       duration: courseDuration,
     },
@@ -803,6 +931,9 @@ export async function pushModuleStartEvent(courseId) {
   const courseMeta = await getCurrentCourseMeta();
   const stepInfo = await getCurrentStepInfo();
 
+  const courseFullSolution = courseMeta?.solution || '';
+  const courseSolution = courseFullSolution?.split(',')[0].trim() || '';
+
   window.adobeDataLayer.push({
     event: 'moduleStart',
     module: {
@@ -811,8 +942,10 @@ export async function pushModuleStartEvent(courseId) {
     courses: {
       title: courseMeta?.heading || '',
       id: courseId || '',
-      solution: courseMeta?.solution || '',
+      solution: courseSolution,
+      fullSolution: courseFullSolution,
       role: courseMeta?.role || '',
+      level: courseMeta?.level || '',
     },
   });
 }
@@ -825,6 +958,9 @@ export async function pushModuleCompletionEvent(courseId) {
   const courseMeta = await getCurrentCourseMeta();
   const stepInfo = await getCurrentStepInfo();
 
+  const courseFullSolution = courseMeta?.solution || '';
+  const courseSolution = courseFullSolution?.split(',')[0].trim() || '';
+
   window.adobeDataLayer.push({
     event: 'moduleCompleted',
     module: {
@@ -833,8 +969,10 @@ export async function pushModuleCompletionEvent(courseId) {
     courses: {
       title: courseMeta?.heading || '',
       id: courseId || '',
-      solution: courseMeta?.solution || '',
+      solution: courseSolution,
+      fullSolution: courseFullSolution,
       role: courseMeta?.role || '',
+      level: courseMeta?.level || '',
     },
   });
 }
@@ -845,7 +983,9 @@ export async function pushModuleCompletionEvent(courseId) {
  * @param {string} courseData.title - Title of the course
  * @param {string} courseData.id - ID of the course
  * @param {string} courseData.solution - Solution related to the course
+ * @param {string} courseData.fullSolution - Full solution (comma-separated)
  * @param {string} courseData.role - Role associated with the course
+ * @param {string} courseData.level - Level (comma-separated)
  * @param {string} courseData.startTime - Start time of the course
  */
 export function pushCourseStartEvent(courseData) {
@@ -857,7 +997,9 @@ export function pushCourseStartEvent(courseData) {
       title: courseData.title,
       id: courseData.id,
       solution: courseData.solution,
+      fullSolution: courseData.fullSolution || courseData.solution,
       role: courseData.role,
+      level: courseData.level || '',
       startTime: courseData.startTime,
     },
   });
@@ -867,28 +1009,403 @@ export function pushCourseStartEvent(courseData) {
  * Pushes a browse card click event to the Adobe Data Layer.
  * This event is fired whenever a user clicks on any part of a browse card.
  *
- * @param {string} eventName - The name of the event to be pushed (e.g., "browseCardClicked").
+ * @param {string} eventName - The name of the event to be pushed. For bookmark events, can be 'add' or 'remove' which will be mapped to the appropriate event names.
  * @param {Object} cardData - The data object representing the browse card.
  * @param {string} [cardData.contentType] - The type of content represented by the card (e.g., "article", "video").
  * @param {string} [cardData.viewLink] - The destination URL or domain the card points to.
  * @param {string} [cardData.title] - The display title of the card.
  * @param {string} cardHeader - The header or category associated with the card (used as `linkType`).
  * @param {number} cardPosition - The index or position of the card within the list/grid.
+ * @param {string} [source] - The origin context of the event (e.g., `'docs'`, `'browse-card'`). Conditionally added to `link.source` when provided.
  */
-export function pushBrowseCardClickEvent(eventName, cardData, cardHeader, cardPosition) {
+export function pushBrowseCardClickEvent(eventName, cardData, cardHeader, cardPosition, source) {
+  // Map action shortcuts to event names
+  const eventNameMap = {
+    add: 'bookmarkLinkBrowseCard',
+    remove: 'browseCardRemoveBookmark',
+  };
+  const finalEventName = eventNameMap[eventName] || eventName;
   window.adobeDataLayer = window.adobeDataLayer || [];
+  const product = cardData?.product;
+  const cardFullSolution = Array.isArray(product) ? product.join(',') : product || '';
+
+  const cardSolution = Array.isArray(product) ? product[0] : product?.split(',')[0]?.trim() || '';
+
+  // Determining if the card is in list or grid view
+  const eventsBlock = document.activeElement?.closest('.upcoming-event-v2, .upcoming-event');
+  let viewType = null;
+  let hasViewSwitcher = false;
+
+  if (eventsBlock) {
+    viewType = eventsBlock.classList.contains('list') ? 'List' : 'Grid';
+    hasViewSwitcher = !!eventsBlock.querySelector('.browse-cards-view-switcher');
+  }
 
   const dataLayerEntry = {
-    event: eventName,
+    event: finalEventName,
     link: {
       contentType: cardData?.contentType?.toLowerCase().trim() || '',
+      fullSolution: cardFullSolution,
+      solution: cardSolution || '',
       destinationDomain: cardData?.viewLink || '',
       linkTitle: cardData?.title || '',
       linkLocation: 'body',
-      linkType: cardHeader,
+      linkType: hasViewSwitcher && viewType ? `${viewType} | ${cardHeader}` : cardHeader,
       position: cardPosition,
     },
   };
 
+  if (source) {
+    dataLayerEntry.link.source = source;
+  }
+
+  // Deprecated browseCardClicked event (using componentClick instead); other browseCard events(copy,bookmark,toggles) remain active
+  if (eventName !== 'browseCardClicked') {
+    window.adobeDataLayer.push(dataLayerEntry);
+  }
+
+  // Check if the click was on a user-action (bookmark or copy link buttons)
+  const isUserAction = document.activeElement?.closest('.user-actions') !== null;
+
+  // Only trigger componentClick event if not a user-action click
+  if (!isUserAction) {
+    // Get the component name
+    let componentName = 'browse-card';
+    const browseCardElement = document.activeElement?.closest('[data-block-name]');
+    if (browseCardElement && browseCardElement.dataset.blockName) {
+      componentName = browseCardElement.dataset.blockName;
+    }
+
+    const componentID = generateComponentID(browseCardElement, componentName);
+
+    // Find the section ID that this component belongs to
+    const section = browseCardElement?.closest('.section');
+    const sectionID = section?.dataset?.sectionId;
+
+    const componentClickData = {
+      component: componentName,
+      componentID,
+      linkTitle: cardData?.title || '',
+      linkType: hasViewSwitcher && viewType ? `${viewType} | ${cardHeader}` : cardHeader,
+      destinationDomain: cardData?.viewLink || '',
+      contentType: cardData?.contentType?.toLowerCase().trim() || '',
+      solution: cardSolution || '',
+      fullSolution: cardFullSolution || '',
+      position: cardPosition,
+    };
+
+    if (sectionID) {
+      componentClickData.sectionID = sectionID;
+    }
+
+    pushComponentClick(componentClickData);
+  }
+}
+
+/**
+ * Pushes a browse filter search event to the Adobe Data Layer.
+ * This event is fired whenever a user clicks on any part of a browse card.
+ * This event is fired when users interact with search and filter functionality.
+ *
+ * @param {string} searchType - Type of search: "filter", "search", or "filter+search"
+ * @param {string} [filterType] - Comma-separated list of filter categories
+ * @param {string} [filterValue] - Comma-separated list of filter values aligned with filterType
+ * @param {string} [searchValue] - Keyword entered by user
+ * @param {number} results - Integer count of results returned
+ */
+export function pushBrowseFilterSearchEvent(searchType, filterType, filterValue, searchValue, results) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  const dataLayerEntry = {
+    event: 'browseFilterSearch',
+    input: {
+      searchType,
+      results,
+    },
+  };
+
+  // Adding appropriate properties based on searchType
+  if (searchType === 'filter' || searchType === 'filter+search') {
+    dataLayerEntry.input.filterType = filterType;
+    dataLayerEntry.input.filterValue = filterValue;
+  }
+
+  if (searchType === 'search' || searchType === 'filter+search') {
+    dataLayerEntry.input.searchValue = searchValue;
+  }
+
   window.adobeDataLayer.push(dataLayerEntry);
+}
+
+/**
+ * Pushes a browse filter search clear event to the Adobe Data Layer.
+ * This event is fired when users click the Clear Filters button.
+ *
+ * @param {string} searchType - Type of search that was used before clearing
+ * @param {string} [filterType] - Comma-separated list of filter categories before clearing
+ * @param {string} [filterValue] - Comma-separated list of filter values before clearing
+ * @param {string} [searchValue] - Keyword entered before clearing
+ * @param {number} results - Integer count of results before clearing
+ */
+export function pushBrowseFilterSearchClearEvent(searchType, filterType, filterValue, searchValue, results) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  const dataLayerEntry = {
+    event: 'browseFilterSearchClear',
+    input: {
+      searchType,
+      results,
+    },
+  };
+
+  // Adding appropriate properties based on searchType
+  if (searchType === 'filter' || searchType === 'filter+search') {
+    dataLayerEntry.input.filterType = filterType;
+    dataLayerEntry.input.filterValue = filterValue;
+  }
+
+  if (searchType === 'search' || searchType === 'filter+search') {
+    dataLayerEntry.input.searchValue = searchValue;
+  }
+
+  window.adobeDataLayer.push(dataLayerEntry);
+}
+
+/**
+ * Pushes a grid toggle event to the Adobe Data Layer.
+ * This event is fired when users switch to grid view.
+ * @param {string} cardHeader - The header associated with the block.
+ */
+export function pushGridToggleEvent(cardHeader) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  window.adobeDataLayer.push({
+    event: 'browseCardGridToggle',
+    link: {
+      linkType: cardHeader,
+    },
+  });
+}
+
+/**
+ * Pushes a list toggle event to the Adobe Data Layer.
+ * This event is fired when users switch to list view.
+ * @param {string} cardHeader - The header associated with the block.
+ */
+export function pushListToggleEvent(cardHeader) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  window.adobeDataLayer.push({
+    event: 'browseCardListToggle',
+    link: {
+      linkType: cardHeader,
+    },
+  });
+}
+
+function pushComponentImpressionEvent(data) {
+  window.adobeDataLayer.push({
+    event: 'componentImpression',
+    component: data.component || '',
+    componentID: data.componentID || '',
+    link: {
+      contentType: data.contentType || '',
+      destinationDomain: data.destinationDomain || '',
+      fullSolution: data.fullSolution || '',
+      linkLocation: data.linkLocation || '',
+      linkTitle: data.linkTitle || '',
+      linkType: data.linkType || '',
+      solution: data.solution || '',
+      productV2: '',
+      featureV2: '',
+      subFeatureV2: '',
+      topicV2: '',
+      industryV2: '',
+      roleV2: '',
+      levelV2: '',
+    },
+  });
+}
+
+export function setupComponentImpressions() {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  const visibilityState = new WeakMap();
+  const debounceTimers = new WeakMap();
+  const DEBOUNCE_TIME = 2000;
+
+  const componentSelectors = [
+    '[data-block-name="marquee"]',
+    '[data-block-name="columns"]',
+    '[data-block-name="announcement-ribbon"]',
+    '[data-block-name="media"]',
+    '[data-block-name="detailed-teaser"]',
+    '[data-block-name="carousel"] [data-panel]',
+    '[data-block-name="authorable-card"]',
+  ];
+
+  function fireImpression(unit) {
+    if (unit.hasAttribute('data-panel') && !unit.classList.contains('active')) {
+      return;
+    }
+
+    const currentUrl = window.location.href.split('#')[0];
+    const component = unit.closest('[data-block-name]');
+    const componentName = component?.dataset.blockName || 'unknown';
+
+    let componentID = currentUrl;
+
+    if (component) {
+      const allComponentsOfType = document.querySelectorAll(`[data-block-name="${componentName}"]`);
+
+      let instanceNumber = 1;
+      for (let i = 0; i < allComponentsOfType.length; i += 1) {
+        if (allComponentsOfType[i] === component) break;
+        instanceNumber += 1;
+      }
+
+      componentID =
+        allComponentsOfType.length > 1
+          ? `${currentUrl}#${componentName}${instanceNumber}`
+          : `${currentUrl}#${componentName}`;
+    }
+
+    let links = [];
+    let isAuthorableCard = false;
+
+    if (unit.classList.contains('browse-card')) {
+      isAuthorableCard = true;
+      const anchor = unit.closest('a[href]');
+      if (anchor) links = [anchor];
+    } else {
+      links = unit.querySelectorAll('a[href]');
+    }
+
+    if (links.length) {
+      links.forEach((link) => {
+        let linkTitleText = '';
+        let contentType = '';
+        let componentSolution = '';
+        let componentFullSolution = '';
+        let headerText = '';
+        if (isAuthorableCard) {
+          linkTitleText = unit.querySelector('.browse-card-title-text')?.innerText?.trim() || '';
+          headerText = component?.querySelector('h1,h2,h3,h4')?.textContent?.trim() || '';
+          contentType =
+            unit.closest('[data-analytics-content-type]')?.getAttribute('data-analytics-content-type') || '';
+          const baseSolution = unit.querySelector('.browse-card-solution-text')?.innerText?.trim() || '';
+
+          const capitalize = (s) => s.toLowerCase().replace(/\b\w/g, (l) => l.toUpperCase());
+
+          if (baseSolution.toLowerCase() === 'multisolution') {
+            const tooltip = unit.querySelector('.tooltip-text')?.textContent?.trim() || '';
+            componentFullSolution = tooltip;
+            componentSolution = tooltip.split(',')[0].trim();
+          } else {
+            componentSolution = capitalize(baseSolution);
+            componentFullSolution = capitalize(baseSolution);
+          }
+        } else {
+          linkTitleText = link.innerText?.trim() || '';
+          headerText =
+            unit.querySelector('h1,h2,h3,h4')?.innerText?.trim() ||
+            component?.querySelector('h1,h2,h3,h4')?.innerText?.trim() ||
+            '';
+        }
+        pushComponentImpressionEvent({
+          component: componentName,
+          componentID,
+          linkTitle: linkTitleText || '',
+          linkType: headerText,
+          destinationDomain: link.href || '',
+          linkLocation: 'body',
+          contentType,
+          solution: componentSolution,
+          fullSolution: componentFullSolution,
+        });
+      });
+    } else {
+      pushComponentImpressionEvent({
+        component: componentName,
+        componentID,
+      });
+    }
+  }
+
+  function cancelDebounce(unit) {
+    const timer = debounceTimers.get(unit);
+    if (timer) {
+      clearTimeout(timer);
+      debounceTimers.delete(unit);
+    }
+  }
+
+  function startDebounce(unit) {
+    cancelDebounce(unit);
+    const timer = setTimeout(() => {
+      fireImpression(unit);
+    }, DEBOUNCE_TIME);
+    debounceTimers.set(unit, timer);
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        const unit = entry.target;
+        const isVisible = entry.isIntersecting;
+        const wasVisible = visibilityState.get(unit) || false;
+
+        if (unit.dataset.blockName === 'authorable-card') {
+          const cards = unit.querySelectorAll('.browse-card');
+          if (!cards.length) return;
+          cards.forEach((card) => {
+            visibilityState.delete(card);
+            debounceTimers.delete(card);
+            observer.observe(card);
+          });
+          observer.unobserve(unit);
+          return;
+        }
+
+        if (!wasVisible && isVisible) {
+          visibilityState.set(unit, true);
+          startDebounce(unit);
+        }
+
+        if (wasVisible && !isVisible) {
+          visibilityState.set(unit, false);
+          cancelDebounce(unit);
+        }
+      });
+    },
+    { threshold: 0.6 },
+  );
+
+  document.querySelectorAll(componentSelectors.join(',')).forEach((component) => {
+    if (component.dataset.blockName === 'authorable-card') {
+      observer.observe(component);
+    } else if (component.dataset.blockName === 'columns') {
+      component.querySelectorAll(':scope > div > div').forEach((col) => {
+        observer.observe(col);
+      });
+    } else if (component.dataset.blockName === 'carousel') {
+      component.querySelectorAll('[data-panel]').forEach((panel) => {
+        observer.observe(panel);
+      });
+    } else {
+      observer.observe(component);
+    }
+  });
+}
+
+export function pushTopNavSearchEvent(contentTypeDropDown, searchTerm) {
+  window.adobeDataLayer = window.adobeDataLayer || [];
+
+  window.adobeDataLayer.push({
+    event: 'topNavSearch',
+    search: {
+      contentTypeDropDown: contentTypeDropDown || '',
+      searchTerm: searchTerm || '',
+    },
+  });
 }

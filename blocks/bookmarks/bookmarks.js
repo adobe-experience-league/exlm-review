@@ -8,6 +8,9 @@ import getEmitter from '../../scripts/events.js';
 import { getCardData, convertToTitleCase } from '../../scripts/browse-card/browse-card-utils.js';
 import { CONTENT_TYPES } from '../../scripts/data-service/coveo/coveo-exl-pipeline-constants.js';
 import { sanitizeBookmarks } from '../../scripts/user-actions/bookmark.js';
+import { getCurrentCourses } from '../../scripts/courses/course-profile.js';
+import BrowseCardsCourseEnricher from '../../scripts/browse-card/browse-cards-course-enricher.js';
+import PL_CONTENT_TYPES from '../../scripts/data-service/premium-learning/premium-learning-constants.js';
 
 const BATCH_SIZE = 6;
 const bookmarksEventEmitter = getEmitter('bookmarks');
@@ -54,6 +57,10 @@ export const parse = (model) => {
     bookmarkLink: '',
     viewLink: URL,
     viewLinkText: placeholders[`browseCard${contentTypeTitleCase}ViewLabel`] || 'View',
+    // Course-specific metadata for level and duration support
+    el_level: fullMetaJson.level || model.el_level,
+    el_course_duration: fullMetaJson['course-duration'] || model.el_course_duration,
+    el_course_module_count: fullMetaJson['course-module-count'] || model.el_course_module_count,
   };
 };
 
@@ -68,6 +75,19 @@ function parseFullMeta(metaString) {
     }
   });
   return jsonObject;
+}
+
+/**
+ * Check if card response is premium-learning content
+ * @param {Object} cardResponse - API response object
+ * @returns {boolean} True if premium-learning content
+ */
+function isPremiumLearningContent(cardResponse) {
+  return (
+    cardResponse.type === 'learningObject' ||
+    cardResponse.id?.startsWith(`${PL_CONTENT_TYPES.COHORT.MAPPING_KEY}:`) ||
+    cardResponse.id?.startsWith(`${PL_CONTENT_TYPES.COURSE.MAPPING_KEY}:`)
+  );
 }
 
 async function renderCards(block) {
@@ -93,6 +113,12 @@ async function renderCards(block) {
     return bookmarkId;
   });
 
+  // Load PLAdaptor and userCourses once before processing batches
+  const [{ default: PLAdaptor }, userCourses] = await Promise.all([
+    import('../../scripts/browse-card/browse-cards-premium-learning-adaptor.js'),
+    getCurrentCourses(),
+  ]);
+
   async function processBatch(bookmarkBatch) {
     const bookmarkPromises = bookmarkBatch.map((bookmarkId) => {
       if (bookmarkId.startsWith('/')) {
@@ -106,31 +132,58 @@ async function renderCards(block) {
 
     const cardResponses = await Promise.all(bookmarkPromises);
 
-    cardResponses.forEach(async (cardResponse) => {
+    await cardResponses.reduce(async (previousPromise, cardResponse) => {
+      await previousPromise;
+
       if (!cardResponse) {
         wrapper.lastElementChild.remove();
-      } else {
-        const parsedCard = parse(cardResponse);
-        const cardDiv = wrapper.querySelector('.browse-card-shimmer-wrapper');
-        cardDiv.innerHTML = '';
-        cardDiv.className = '';
-        cardDiv.classList.add('bookmarks-card');
-        await buildCard(wrapper, cardDiv, parsedCard);
+        return Promise.resolve();
       }
-    });
+
+      // Parse premium-learning content with adaptor, regular content with parse()
+      // Note: For bookmarks, disable filterInactiveCohortInstances since these are user-selected items
+      let parsedCard = isPremiumLearningContent(cardResponse)
+        ? (
+            await PLAdaptor.mapResultsToCardsData(
+              { data: [cardResponse], included: cardResponse.included || [] },
+              { filterInactiveCohortInstances: false },
+            )
+          )[0]
+        : parse(cardResponse);
+
+      if (!parsedCard) {
+        wrapper.lastElementChild.remove();
+        return Promise.resolve();
+      }
+
+      // Enrich course cards with status information for signed-in users
+      if (parsedCard.contentType?.toLowerCase() === CONTENT_TYPES.COURSE.MAPPING_KEY.toLowerCase()) {
+        [parsedCard] = BrowseCardsCourseEnricher.enrichCardsWithCourseStatus([parsedCard], userCourses);
+      }
+
+      const cardDiv = wrapper.querySelector('.browse-card-shimmer-wrapper');
+      cardDiv.innerHTML = '';
+      cardDiv.className = '';
+      cardDiv.classList.add('bookmarks-card');
+      await buildCard(cardDiv, parsedCard);
+
+      return Promise.resolve();
+    }, Promise.resolve());
   }
 
   buildCardsShimmer.shimmerContainer.classList.remove('browse-card-shimmer');
 
   async function processBookmarksInBatches(bookmarksIds) {
+    const batches = [];
     for (let i = 0; i < bookmarksIds.length; i += BATCH_SIZE) {
-      const batch = bookmarksIds.slice(i, i + BATCH_SIZE);
-      // eslint-disable-next-line no-await-in-loop
-      await processBatch(batch);
+      batches.push(bookmarksIds.slice(i, i + BATCH_SIZE));
     }
+
+    // Process batches sequentially using reduce
+    await batches.reduce((promise, batch) => promise.then(() => processBatch(batch)), Promise.resolve());
   }
 
-  processBookmarksInBatches(bookmarkIds);
+  await processBookmarksInBatches(bookmarkIds);
 }
 
 export default async function decorateBlock(block) {
